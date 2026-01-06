@@ -1,0 +1,173 @@
+"""Bot handlers."""
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, PreCheckoutQuery
+from aiogram.filters import Command
+from aiogram import Bot
+import logging
+
+from database import Database
+from keyboards import main_menu, buy_btn
+from payments import send_course_invoice, process_pre_checkout_query, process_successful_payment
+
+logger = logging.getLogger(__name__)
+
+router = Router()
+
+
+@router.message(Command("start"))
+async def cmd_start(message: Message, bot: Bot, db: Database, channel_id: str) -> None:
+    """Handle /start command."""
+    user_id = message.from_user.id
+    
+    try:
+        await db.add_user(user_id)
+        
+        # Check if user already paid
+        is_paid = await db.is_paid(user_id)
+        
+        if is_paid:
+            # Create invite link for paid user
+            try:
+                invite_link = await bot.create_chat_invite_link(
+                    chat_id=channel_id, member_limit=1
+                )
+                await message.answer(
+                    f"👋 Добро пожаловать обратно!\n\n"
+                    f"🔗 Ваша ссылка для доступа к курсу:\n{invite_link.invite_link}",
+                    reply_markup=main_menu()
+                )
+            except Exception as e:
+                logger.error(f"Error creating invite link for paid user {user_id}: {e}")
+                await message.answer(
+                    "👋 Добро пожаловать обратно!\n\n"
+                    "Вы уже оплатили курс. Обратитесь к администратору для получения доступа.",
+                    reply_markup=main_menu()
+                )
+        else:
+            await message.answer(
+                "👋 Добро пожаловать!\n\n"
+                "Выберите действие:",
+                reply_markup=main_menu()
+            )
+    except Exception as e:
+        logger.error(f"Error in /start handler: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
+
+
+@router.message(Command("trial"))
+async def cmd_trial(message: Message) -> None:
+    """Handle /trial command."""
+    try:
+        with open("materials/trial_lesson.md", "r", encoding="utf-8") as f:
+            trial_content = f.read()
+        
+        await message.answer(
+            trial_content,
+            reply_markup=buy_btn()
+        )
+    except FileNotFoundError:
+        await message.answer(
+            "📚 Пробный урок временно недоступен.\n\n"
+            "Но вы можете приобрести полный курс прямо сейчас!",
+            reply_markup=buy_btn()
+        )
+    except Exception as e:
+        logger.error(f"Error in /trial handler: {e}")
+        await message.answer("Произошла ошибка при загрузке пробного урока.")
+
+
+@router.callback_query(F.data == "trial")
+async def callback_trial(callback: CallbackQuery) -> None:
+    """Handle trial button callback."""
+    try:
+        with open("materials/trial_lesson.md", "r", encoding="utf-8") as f:
+            trial_content = f.read()
+        
+        await callback.message.edit_text(
+            trial_content,
+            reply_markup=buy_btn()
+        )
+        await callback.answer()
+    except FileNotFoundError:
+        await callback.message.edit_text(
+            "📚 Пробный урок временно недоступен.\n\n"
+            "Но вы можете приобрести полный курс прямо сейчас!",
+            reply_markup=buy_btn()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Error in trial callback: {e}")
+        await callback.answer("Произошла ошибка.", show_alert=True)
+
+
+@router.callback_query(F.data == "buy_course")
+async def callback_buy_course(
+    callback: CallbackQuery, bot: Bot, provider_token: str, course_price: int
+) -> None:
+    """Handle buy course button callback."""
+    
+    try:
+        # Validate provider token format
+        if not provider_token or len(provider_token) < 10:
+            logger.error("Provider token is empty or too short")
+            await callback.answer(
+                "Ошибка: токен провайдера не настроен. Проверьте .env файл.",
+                show_alert=True
+            )
+            return
+            
+        await send_course_invoice(bot, callback.from_user.id, provider_token, course_price)
+        await callback.answer()
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Error in buy_course callback: {e}")
+        
+        # More user-friendly error messages
+        if "PAYMENT_PROVIDER_INVALID" in error_msg:
+            await callback.answer(
+                "❌ Ошибка: неверный токен провайдера.\n\n"
+                "Нужен токен для Telegram Payments из личного кабинета ЮKassa.\n"
+                "См. файл PAYMENT_SETUP.md для инструкций.",
+                show_alert=True
+            )
+        else:
+            await callback.answer("Ошибка при создании счета. Попробуйте позже.", show_alert=True)
+
+
+@router.pre_checkout_query()
+async def pre_checkout_handler(
+    pre_checkout_query: PreCheckoutQuery,
+    bot: Bot
+) -> None:
+    """Handle pre-checkout query."""
+    await process_pre_checkout_query(pre_checkout_query, bot)
+
+
+@router.message(F.successful_payment)
+async def successful_payment_handler(
+    message: Message, bot: Bot, db: Database, channel_id: str
+) -> None:
+    """Handle successful payment."""
+    
+    user_id = message.from_user.id
+    
+    invite_link = await process_successful_payment(
+        bot, user_id, channel_id, db
+    )
+    
+    if invite_link:
+        await message.answer(
+            f"✅ Оплата успешно получена!\n\n"
+            f"🔗 Ваша ссылка для доступа к курсу:\n{invite_link}\n\n"
+            f"Ссылка одноразовая, используйте её для входа в канал с курсом."
+        )
+    else:
+        logger.warning(f"Could not create invite link for user {user_id}. Channel: {channel_id}")
+        await message.answer(
+            f"✅ Оплата успешно получена!\n\n"
+            f"⚠️ Внимание: не удалось автоматически создать ссылку для доступа.\n\n"
+            f"Ваш платеж зарегистрирован в системе. "
+            f"Обратитесь к администратору для получения доступа к курсу.\n\n"
+            f"Ваш ID: {user_id}"
+        )
+
