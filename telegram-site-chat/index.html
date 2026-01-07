@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Telegram Чат</title>
+    <style>
+        #chat { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; }
+        #messageForm { margin-top: 10px; }
+        input[type="text"] { width: 70%; padding: 5px; }
+        button { padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <div id="chat"></div>
+    <form id="messageForm">
+        <input type="hidden" id="chatId" value="">
+        <input type="text" id="message" placeholder="Введите сообщение..." required>
+        <button type="submit">Отправить</button>
+    </form>
+
+    <script>
+        const chatId = 'chat_' + Math.random().toString(36).substr(2, 9);  // Уникальный ID
+        document.getElementById('chatId').value = chatId;
+        const chatEl = document.getElementById('chat');
+        const form = document.getElementById('messageForm');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const message = document.getElementById('message').value;
+            chatEl.innerHTML += `<div><strong>Вы:</strong> ${message}</div>`;
+            
+            try {
+                const res = await fetch('http://localhost:5000/send_message', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({chat_id: chatId, message})
+                });
+                if (res.ok) {
+                    document.getElementById('message').value = '';
+                }
+            } catch (err) {
+                chatEl.innerHTML += '<div>Ошибка отправки</div>';
+            }
+        });
+
+        // Поллинг ответов от админа
+        console.log('Начат polling для chat_id:', chatId);
+        setInterval(async () => {
+            try {
+                const res = await fetch(`http://localhost:5000/get_replies?chat_id=${encodeURIComponent(chatId)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    console.log('Получены данные от сервера:', data);
+                    if (data.replies && data.replies.length > 0) {
+                        data.replies.forEach(reply => {
+                            chatEl.innerHTML += `<div style="color: blue;"><strong>Админ:</strong> ${reply}</div>`;
+                            console.log('Добавлен ответ в чат:', reply);
+                        });
+                        chatEl.scrollTop = chatEl.scrollHeight;
+                    }
+                } else {
+                    console.log('Ошибка ответа сервера:', res.status, await res.text());
+                }
+            } catch (err) {
+                console.error('Ошибка при запросе ответов:', err);
+            }
+        }, 2000); // Уменьшил интервал до 2 секунд для более быстрой реакции
+    </script>
+</body>
+</html>
