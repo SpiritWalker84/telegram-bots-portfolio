@@ -35,14 +35,16 @@ class TelegramBot:
         self._chat_id = value
         self.logger.info(f"Chat ID установлен: {value}")
     
-    def send_message(self, text: str, parse_mode: Optional[str] = "HTML", chat_id: Optional[str] = None) -> bool:
+    def send_message(self, text: str, parse_mode: Optional[str] = "HTML", chat_id: Optional[str] = None, max_retries: int = 3, retry_delay: int = 2) -> bool:
         """
-        Отправляет сообщение в Telegram
+        Отправляет сообщение в Telegram с retry-логикой
         
         Args:
             text: Текст сообщения
             parse_mode: Режим парсинга (HTML или Markdown)
             chat_id: ID чата (если не указан, используется сохраненный)
+            max_retries: Максимальное количество попыток
+            retry_delay: Задержка между попытками в секундах
             
         Returns:
             bool: True если сообщение отправлено успешно, False иначе
@@ -60,14 +62,27 @@ class TelegramBot:
             "parse_mode": parse_mode
         }
         
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
-            self.logger.debug("Сообщение успешно отправлено в Telegram")
-            return True
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Ошибка при отправке сообщения в Telegram: {e}")
-            return False
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(url, json=payload, timeout=10)
+                response.raise_for_status()
+                self.logger.debug("Сообщение успешно отправлено в Telegram")
+                return True
+            except requests.exceptions.Timeout:
+                self.logger.warning(f"Таймаут при отправке сообщения (попытка {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+            except requests.exceptions.ConnectionError as e:
+                self.logger.warning(f"Ошибка соединения при отправке сообщения (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Ошибка при отправке сообщения в Telegram (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+        
+        self.logger.error(f"Не удалось отправить сообщение после {max_retries} попыток")
+        return False
     
     def format_order_notification(self, order) -> str:
         """
@@ -156,7 +171,7 @@ class TelegramBot:
     
     def send_daily_statistics(self, orders_count: int, date: str = None) -> bool:
         """
-        Отправляет статистику за день
+        Отправляет статистику за день с retry-логикой (3 попытки с задержкой 5 секунд)
         
         Args:
             orders_count: Количество заказов за день
@@ -166,23 +181,38 @@ class TelegramBot:
             bool: True если сообщение отправлено успешно, False иначе
         """
         message = self.format_daily_statistics(orders_count, date)
-        return self.send_message(message)
+        return self.send_message(message, max_retries=3, retry_delay=5)
     
     def test_connection(self) -> bool:
         """
-        Проверяет соединение с Telegram API
+        Проверяет соединение с Telegram API с retry-логикой
         
         Returns:
             bool: True если соединение успешно, False иначе
         """
-        try:
-            url = f"{self.base_url}/getMe"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            return True
-        except Exception as e:
-            self.logger.error(f"Ошибка при проверке соединения с Telegram: {e}")
-            return False
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                url = f"{self.base_url}/getMe"
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                return True
+            except requests.exceptions.Timeout:
+                self.logger.warning(f"Таймаут при проверке соединения (попытка {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+            except requests.exceptions.ConnectionError as e:
+                self.logger.warning(f"Ошибка соединения (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+            except Exception as e:
+                self.logger.error(f"Ошибка при проверке соединения с Telegram (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+        
+        return False
     
     def get_updates(self, timeout: int = 10) -> list:
         """

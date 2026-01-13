@@ -8,16 +8,32 @@ from monitor import OrderMonitor
 
 
 def setup_logging() -> None:
-    """Настройка логирования"""
+    """Настройка логирования с принудительным flush для демона"""
+    # Создаем кастомный handler с flush
+    class FlushingStreamHandler(logging.StreamHandler):
+        def emit(self, record):
+            super().emit(record)
+            self.flush()
+    
+    class FlushingFileHandler(logging.FileHandler):
+        def emit(self, record):
+            super().emit(record)
+            self.flush()
+    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler('wb_fbs_bot.log', encoding='utf-8')
-        ]
+            FlushingStreamHandler(sys.stdout),
+            FlushingFileHandler('wb_fbs_bot.log', encoding='utf-8')
+        ],
+        force=True  # Перезаписываем существующую конфигурацию
     )
+    
+    # Принудительный flush для stdout
+    sys.stdout.flush()
+    sys.stderr.flush()
 
 
 def main():

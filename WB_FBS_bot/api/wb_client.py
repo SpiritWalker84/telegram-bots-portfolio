@@ -72,44 +72,72 @@ class WBAPIClient:
             "Content-Type": "application/json"
         })
     
-    def get_new_orders(self) -> List[Order]:
+    def get_new_orders(self, max_retries: int = 3, retry_delay: int = 10) -> List[Order]:
         """
-        Получает список новых заказов FBS
+        Получает список новых заказов FBS с retry-логикой
         
+        Args:
+            max_retries: Максимальное количество попыток
+            retry_delay: Задержка между попытками в секундах
+            
         Returns:
             List[Order]: Список новых заказов
             
         Raises:
-            requests.RequestException: При ошибке запроса к API
+            requests.RequestException: При ошибке запроса к API после всех попыток
         """
-        try:
-            self.logger.info(f"Запрос новых заказов: {self.api_url}")
-            response = self.session.get(self.api_url, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            orders_data = data.get("orders", [])
-            
-            # Фильтруем только FBS заказы
-            fbs_orders = [
-                order_data for order_data in orders_data
-                if order_data.get("deliveryType", "").lower() == "fbs"
-            ]
-            
-            orders = [Order.from_dict(order_data) for order_data in fbs_orders]
-            self.logger.info(f"Получено {len(orders)} новых FBS заказов")
-            
-            return orders
-            
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Ошибка при запросе к API WB: {e}")
-            raise
-        except KeyError as e:
-            self.logger.error(f"Неожиданная структура ответа API: {e}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Неожиданная ошибка при обработке ответа API: {e}")
-            raise
+        import time
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.logger.info(f"Запрос новых заказов: {self.api_url} (попытка {attempt}/{max_retries})")
+                response = self.session.get(self.api_url, timeout=30)
+                response.raise_for_status()
+                
+                data = response.json()
+                orders_data = data.get("orders", [])
+                
+                # Фильтруем только FBS заказы
+                fbs_orders = [
+                    order_data for order_data in orders_data
+                    if order_data.get("deliveryType", "").lower() == "fbs"
+                ]
+                
+                orders = [Order.from_dict(order_data) for order_data in fbs_orders]
+                self.logger.info(f"Получено {len(orders)} новых FBS заказов")
+                
+                return orders
+                
+            except requests.exceptions.Timeout:
+                self.logger.warning(f"Таймаут при запросе к API WB (попытка {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    self.logger.info(f"Повторная попытка через {retry_delay} секунд...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except requests.exceptions.ConnectionError as e:
+                self.logger.warning(f"Ошибка соединения с API WB (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    self.logger.info(f"Повторная попытка через {retry_delay} секунд...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Ошибка при запросе к API WB (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    self.logger.info(f"Повторная попытка через {retry_delay} секунд...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except KeyError as e:
+                self.logger.error(f"Неожиданная структура ответа API: {e}")
+                raise
+            except Exception as e:
+                self.logger.error(f"Неожиданная ошибка при обработке ответа API: {e}")
+                raise
+        
+        # Не должно достигнуть этой точки, но на всякий случай
+        raise requests.exceptions.RequestException("Не удалось получить заказы после всех попыток")
     
     def test_connection(self) -> bool:
         """

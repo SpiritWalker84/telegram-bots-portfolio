@@ -3,6 +3,7 @@
 """
 import time
 import logging
+import sys
 from typing import Optional
 from datetime import datetime, timedelta
 
@@ -76,28 +77,61 @@ class OrderMonitor:
             return
         
         try:
+            consecutive_errors = 0
+            max_consecutive_errors = 5
+            
             while self.is_running:
-                self._process_orders()
-                self._check_and_send_daily_report()
-                
-                # Форматируем время до следующей проверки
-                minutes = self.config.wb_poll_interval // 60
-                seconds = self.config.wb_poll_interval % 60
-                if minutes > 0:
-                    if seconds > 0:
-                        time_str = f"{minutes} мин {seconds} сек"
+                try:
+                    self._process_orders()
+                    self._check_and_send_daily_report()
+                    
+                    # Сбрасываем счетчик ошибок при успешной итерации
+                    consecutive_errors = 0
+                    
+                    # Форматируем время до следующей проверки
+                    minutes = self.config.wb_poll_interval // 60
+                    seconds = self.config.wb_poll_interval % 60
+                    if minutes > 0:
+                        if seconds > 0:
+                            time_str = f"{minutes} мин {seconds} сек"
+                        else:
+                            time_str = f"{minutes} мин"
                     else:
-                        time_str = f"{minutes} мин"
-                else:
-                    time_str = f"{seconds} сек"
-                
-                self.logger.info(f"Следующая проверка через {time_str}")
-                time.sleep(self.config.wb_poll_interval)
+                        time_str = f"{seconds} сек"
+                    
+                    self.logger.info(f"Следующая проверка через {time_str}")
+                    sys.stdout.flush()  # Принудительный flush для демона
+                    
+                    # Защита от зависания: используем sleep с проверкой is_running
+                    sleep_interval = 1  # Проверяем каждую секунду
+                    total_slept = 0
+                    while total_slept < self.config.wb_poll_interval and self.is_running:
+                        time.sleep(sleep_interval)
+                        total_slept += sleep_interval
+                    
+                except Exception as e:
+                    consecutive_errors += 1
+                    self.logger.error(f"Ошибка в цикле мониторинга (ошибка {consecutive_errors}/{max_consecutive_errors}): {e}", exc_info=True)
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                    
+                    # Если слишком много ошибок подряд, останавливаемся
+                    if consecutive_errors >= max_consecutive_errors:
+                        self.logger.critical(f"Превышено максимальное количество последовательных ошибок ({max_consecutive_errors}). Остановка монитора.")
+                        self.stop()
+                        break
+                    
+                    # Небольшая задержка перед следующей попыткой
+                    time.sleep(10)
+                    
         except KeyboardInterrupt:
             self.logger.info("Получен сигнал остановки")
+            sys.stdout.flush()
             self.stop()
         except Exception as e:
-            self.logger.error(f"Критическая ошибка в мониторе: {e}")
+            self.logger.error(f"Критическая ошибка в мониторе: {e}", exc_info=True)
+            sys.stdout.flush()
+            sys.stderr.flush()
             raise
     
     def stop(self) -> None:
@@ -129,12 +163,14 @@ class OrderMonitor:
         """Обрабатывает новые заказы"""
         try:
             self.logger.info("Проверка новых заказов...")
+            sys.stdout.flush()  # Принудительный flush для демона
+            
             orders = self.wb_client.get_new_orders()
             
             new_orders_count = 0
             for order in orders:
                 if not self.db_manager.is_order_processed(order.order_uid):
-                    # Отправляем уведомление
+                    # Отправляем уведомление с retry-логикой
                     if self.telegram_bot.send_order_notification(order):
                         # Помечаем заказ как обработанный
                         self.db_manager.mark_order_as_processed(
@@ -144,8 +180,10 @@ class OrderMonitor:
                         )
                         new_orders_count += 1
                         self.logger.info(f"Новый заказ обработан: {order.order_uid}")
+                        sys.stdout.flush()
                     else:
                         self.logger.warning(f"Не удалось отправить уведомление для заказа: {order.order_uid}")
+                        sys.stdout.flush()
                 else:
                     self.logger.debug(f"Заказ {order.order_uid} уже был обработан")
             
@@ -153,9 +191,13 @@ class OrderMonitor:
                 self.logger.info(f"Обработано новых заказов: {new_orders_count}")
             else:
                 self.logger.info("Новых заказов не обнаружено")
+            
+            sys.stdout.flush()
                 
         except Exception as e:
-            self.logger.error(f"Ошибка при обработке заказов: {e}")
+            self.logger.error(f"Ошибка при обработке заказов: {e}", exc_info=True)
+            sys.stdout.flush()
+            sys.stderr.flush()
     
     def _check_and_send_daily_report(self) -> None:
         """Проверяет время и отправляет ежедневный отчет в 00:00"""
@@ -171,9 +213,14 @@ class OrderMonitor:
                 yesterday_str = yesterday.strftime('%Y-%m-%d')
                 orders_count = self.db_manager.get_orders_count_for_date(yesterday_str)
                 
-                # Отправляем статистику
+                # Отправляем статистику с retry-логикой
                 self.logger.info(f"Отправка ежедневной статистики за {yesterday_str}: {orders_count} заказов")
-                self.telegram_bot.send_daily_statistics(orders_count, yesterday_str)
+                sys.stdout.flush()
+                if self.telegram_bot.send_daily_statistics(orders_count, yesterday_str):
+                    self.logger.info("Ежедневная статистика успешно отправлена")
+                else:
+                    self.logger.warning("Не удалось отправить ежедневную статистику")
+                sys.stdout.flush()
                 
                 # Обновляем дату последнего отчета
                 self.last_daily_report_date = current_date
