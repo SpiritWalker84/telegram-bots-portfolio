@@ -28,6 +28,25 @@ def main():
     try:
         # Загрузка конфигурации
         logger.info("Загрузка конфигурации...")
+        # Проверяем наличие .env файла для отладки
+        import os
+        env_paths = [
+            os.path.join(os.path.dirname(__file__), '.env'),
+            os.path.join(os.getcwd(), '.env'),
+            '.env'
+        ]
+        env_found = False
+        for path in env_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                logger.debug(f"Найден .env файл: {abs_path}")
+                env_found = True
+                break
+        if not env_found:
+            logger.warning("Файл .env не найден в стандартных местах")
+            logger.warning(f"Текущая рабочая директория: {os.getcwd()}")
+            logger.warning(f"Директория скрипта: {os.path.dirname(os.path.abspath(__file__))}")
+        
         config = Config.from_env()
         logger.info("Конфигурация загружена успешно")
         
