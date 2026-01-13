@@ -4,7 +4,7 @@
 import time
 import logging
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config import Config
 from database import DatabaseManager
@@ -34,6 +34,7 @@ class OrderMonitor:
         self._initialize_chat_id()
         
         self.is_running = False
+        self.last_daily_report_date = None  # Дата последнего отчета
     
     def _initialize_chat_id(self) -> None:
         """Инициализирует chat_id из БД или получает его от пользователя"""
@@ -77,7 +78,20 @@ class OrderMonitor:
         try:
             while self.is_running:
                 self._process_orders()
-                self.logger.info(f"Ожидание {self.config.wb_poll_interval} секунд до следующей проверки...")
+                self._check_and_send_daily_report()
+                
+                # Форматируем время до следующей проверки
+                minutes = self.config.wb_poll_interval // 60
+                seconds = self.config.wb_poll_interval % 60
+                if minutes > 0:
+                    if seconds > 0:
+                        time_str = f"{minutes} мин {seconds} сек"
+                    else:
+                        time_str = f"{minutes} мин"
+                else:
+                    time_str = f"{seconds} сек"
+                
+                self.logger.info(f"Следующая проверка через {time_str}")
                 time.sleep(self.config.wb_poll_interval)
         except KeyboardInterrupt:
             self.logger.info("Получен сигнал остановки")
@@ -142,6 +156,31 @@ class OrderMonitor:
                 
         except Exception as e:
             self.logger.error(f"Ошибка при обработке заказов: {e}")
+    
+    def _check_and_send_daily_report(self) -> None:
+        """Проверяет время и отправляет ежедневный отчет в 00:00"""
+        now = datetime.utcnow()
+        current_date = now.date()
+        
+        # Проверяем, наступила ли полночь (00:00-00:01)
+        if now.hour == 0 and now.minute == 0:
+            # Отправляем отчет только один раз за день
+            if self.last_daily_report_date != current_date:
+                # Получаем статистику за вчерашний день
+                yesterday = current_date - timedelta(days=1)
+                yesterday_str = yesterday.strftime('%Y-%m-%d')
+                orders_count = self.db_manager.get_orders_count_for_date(yesterday_str)
+                
+                # Отправляем статистику
+                self.logger.info(f"Отправка ежедневной статистики за {yesterday_str}: {orders_count} заказов")
+                self.telegram_bot.send_daily_statistics(orders_count, yesterday_str)
+                
+                # Обновляем дату последнего отчета
+                self.last_daily_report_date = current_date
+        else:
+            # Сбрасываем дату отчета, если уже не полночь
+            if self.last_daily_report_date == current_date and now.hour != 0:
+                self.last_daily_report_date = None
     
     def get_statistics(self) -> dict:
         """

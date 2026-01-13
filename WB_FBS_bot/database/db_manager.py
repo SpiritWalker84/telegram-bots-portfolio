@@ -175,3 +175,32 @@ class DatabaseManager:
             """, (key, value))
             conn.commit()
             self.logger.debug(f"Настройка {key} сохранена")
+    
+    def get_orders_count_for_date(self, date: str) -> int:
+        """
+        Возвращает количество заказов, обработанных за указанную дату
+        
+        Args:
+            date: Дата в формате YYYY-MM-DD или 'today' для сегодняшней даты
+            
+        Returns:
+            int: Количество заказов за дату
+        """
+        import datetime
+        
+        if date == 'today':
+            target_date = datetime.datetime.utcnow().date()
+        else:
+            target_date = datetime.datetime.strptime(date, '%Y-%m-%d').date()
+        
+        start_datetime = datetime.datetime.combine(target_date, datetime.time.min).isoformat()
+        end_datetime = datetime.datetime.combine(target_date, datetime.time.max).isoformat()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM processed_orders 
+                WHERE processed_at >= ? AND processed_at <= ?
+            """, (start_datetime, end_datetime))
+            result = cursor.fetchone()
+            return result[0] if result else 0

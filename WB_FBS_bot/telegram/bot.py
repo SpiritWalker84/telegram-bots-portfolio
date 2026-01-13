@@ -119,6 +119,55 @@ class TelegramBot:
         message = self.format_order_notification(order)
         return self.send_message(message)
     
+    def format_daily_statistics(self, orders_count: int, date: str = None) -> str:
+        """
+        Форматирует сообщение со статистикой за день
+        
+        Args:
+            orders_count: Количество заказов за день
+            date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
+            
+        Returns:
+            str: Отформатированное сообщение
+        """
+        import datetime
+        
+        if date is None:
+            date_obj = datetime.datetime.utcnow().date()
+        else:
+            date_obj = datetime.datetime.strptime(date, '%Y-%m-%d').date()
+        
+        date_str = date_obj.strftime('%d.%m.%Y')
+        
+        message = f"""
+📊 <b>Статистика за {date_str}</b>
+
+📦 <b>Всего заказов:</b> {orders_count}
+"""
+        
+        if orders_count == 0:
+            message += "\n😔 Заказов не было"
+        elif orders_count == 1:
+            message += "\n✅ Обработан 1 заказ"
+        else:
+            message += f"\n✅ Обработано заказов: {orders_count}"
+        
+        return message.strip()
+    
+    def send_daily_statistics(self, orders_count: int, date: str = None) -> bool:
+        """
+        Отправляет статистику за день
+        
+        Args:
+            orders_count: Количество заказов за день
+            date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
+            
+        Returns:
+            bool: True если сообщение отправлено успешно, False иначе
+        """
+        message = self.format_daily_statistics(orders_count, date)
+        return self.send_message(message)
+    
     def test_connection(self) -> bool:
         """
         Проверяет соединение с Telegram API
