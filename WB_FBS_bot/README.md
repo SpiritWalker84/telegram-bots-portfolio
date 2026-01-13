@@ -18,7 +18,30 @@ Telegram бот для мониторинга новых заказов FBS с W
 
 ## Быстрый старт
 
+### Вариант 1: Использование скрипта запуска (рекомендуется)
+
 ```bash
+# Создание .env файла
+cp .env.example .env
+
+# Заполните .env файл:
+# WB_API_KEY=your_wildberries_api_key_here
+# TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+
+# Запуск через скрипт (автоматически создаст и активирует виртуальную среду)
+chmod +x start.sh
+./start.sh
+```
+
+### Вариант 2: Ручная установка
+
+```bash
+# Создание виртуальной среды
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# или
+venv\Scripts\activate  # Windows
+
 # Установка зависимостей
 pip install -r requirements.txt
 
@@ -86,6 +109,7 @@ WB_FBS_bot/
 │   └── order_monitor.py   # Монитор заказов
 ├── main.py                # Точка входа
 ├── requirements.txt       # Зависимости
+├── start.sh               # Скрипт запуска с виртуальной средой
 ├── .env.example           # Пример конфигурации
 └── README.md              # Документация
 ```
