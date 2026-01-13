@@ -10,7 +10,15 @@ def _load_dotenv():
     """Загружает переменные из .env файла"""
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        # Ищем .env файл в корне проекта (на уровень выше config/)
+        env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+        env_path = os.path.abspath(env_path)
+        # Пробуем загрузить из корня проекта
+        if os.path.exists(env_path):
+            load_dotenv(env_path)
+        else:
+            # Если не найден, пробуем в текущей директории
+            load_dotenv()
     except ImportError:
         # Если dotenv не установлен, загружаем вручную
         env_path = os.path.join(os.path.dirname(__file__), '..', '.env')

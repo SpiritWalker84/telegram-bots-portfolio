@@ -72,10 +72,24 @@ fi
 
 # Проверяем наличие .env файла
 if [ ! -f ".env" ]; then
-    echo -e "${YELLOW}Предупреждение: .env файл не найден!${NC}"
+    echo -e "${RED}Ошибка: .env файл не найден!${NC}"
     if [ -f ".env.example" ]; then
-        echo -e "${YELLOW}Скопируйте .env.example в .env и заполните необходимые параметры${NC}"
+        echo -e "${YELLOW}Создайте .env файл на основе .env.example:${NC}"
+        echo -e "${YELLOW}  cp .env.example .env${NC}"
+        echo -e "${YELLOW}Затем заполните необходимые параметры в .env файле${NC}"
+    else
+        echo -e "${RED}Файл .env.example также не найден!${NC}"
     fi
+    deactivate
+    exit 1
+fi
+
+# Проверяем, что .env файл не пустой
+if [ ! -s ".env" ]; then
+    echo -e "${RED}Ошибка: .env файл пустой!${NC}"
+    echo -e "${YELLOW}Заполните .env файл необходимыми параметрами${NC}"
+    deactivate
+    exit 1
 fi
 
 # Запускаем бота
