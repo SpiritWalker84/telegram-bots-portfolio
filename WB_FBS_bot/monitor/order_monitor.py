@@ -103,11 +103,20 @@ class OrderMonitor:
                     sys.stdout.flush()  # Принудительный flush для демона
                     
                     # Защита от зависания: используем sleep с проверкой is_running
+                    # Также проверяем время для ежедневного отчета каждую минуту
                     sleep_interval = 1  # Проверяем каждую секунду
                     total_slept = 0
+                    last_report_check = 0  # Время последней проверки отчета (в секундах)
+                    
                     while total_slept < self.config.wb_poll_interval and self.is_running:
                         time.sleep(sleep_interval)
                         total_slept += sleep_interval
+                        
+                        # Проверяем ежедневный отчет каждую минуту (60 секунд)
+                        # чтобы не пропустить момент 00:00
+                        if total_slept - last_report_check >= 60:
+                            self._check_and_send_daily_report()
+                            last_report_check = total_slept
                     
                 except Exception as e:
                     consecutive_errors += 1
@@ -204,8 +213,9 @@ class OrderMonitor:
         now = datetime.utcnow()
         current_date = now.date()
         
-        # Проверяем, наступила ли полночь (00:00-00:01)
-        if now.hour == 0 and now.minute == 0:
+        # Проверяем, наступила ли полночь (00:00-00:05) - расширенный диапазон
+        # чтобы не пропустить момент, если проверка происходит не точно в 00:00
+        if now.hour == 0 and now.minute <= 5:
             # Отправляем отчет только один раз за день
             if self.last_daily_report_date != current_date:
                 # Получаем статистику за вчерашний день
@@ -225,8 +235,8 @@ class OrderMonitor:
                 # Обновляем дату последнего отчета
                 self.last_daily_report_date = current_date
         else:
-            # Сбрасываем дату отчета, если уже не полночь
-            if self.last_daily_report_date == current_date and now.hour != 0:
+            # Сбрасываем дату отчета, если уже не полночь (после 00:05)
+            if self.last_daily_report_date == current_date and (now.hour != 0 or now.minute > 5):
                 self.last_daily_report_date = None
     
     def get_statistics(self) -> dict:
