@@ -63,6 +63,7 @@ class Config:
     
     # Опциональные поля со значениями по умолчанию
     wb_api_url: str = "https://marketplace-api.wildberries.ru/api/v3/orders/new"
+    wb_analytics_api_key: Optional[str] = None  # API ключ для Analytics API (если отличается)
     wb_poll_interval: int = 180  # 3 минуты в секундах
     telegram_chat_id: Optional[str] = None  # Опционально, будет получен из бота
     db_path: str = "orders.db"
@@ -89,6 +90,7 @@ class Config:
             telegram_bot_token=telegram_bot_token,
             telegram_chat_id=telegram_chat_id,
             wb_api_url=os.getenv("WB_API_URL", cls.wb_api_url),
+            wb_analytics_api_key=os.getenv("WB_ANALYTICS_API_KEY"),  # Опционально
             wb_poll_interval=int(os.getenv("WB_POLL_INTERVAL", cls.wb_poll_interval)),
             db_path=os.getenv("DB_PATH", cls.db_path)
         )

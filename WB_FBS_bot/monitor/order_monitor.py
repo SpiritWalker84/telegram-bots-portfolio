@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from config import Config
 from database import DatabaseManager
 from api import WBAPIClient
+from api.analytics_client import WBAnalyticsClient
 from telegram import TelegramBot
 
 
@@ -31,11 +32,16 @@ class OrderMonitor:
         self.wb_client = WBAPIClient(config.wb_api_key, config.wb_api_url)
         self.telegram_bot = TelegramBot(config.telegram_bot_token, config.telegram_chat_id)
         
+        # Инициализация Analytics API (если указан ключ)
+        analytics_api_key = config.wb_analytics_api_key or config.wb_api_key
+        self.analytics_client = WBAnalyticsClient(analytics_api_key) if analytics_api_key else None
+        
         # Получаем или устанавливаем chat_id
         self._initialize_chat_id()
         
         self.is_running = False
         self.last_daily_report_date = None  # Дата последнего отчета
+        self.last_views_report_date = None  # Дата последнего отчета о просмотрах
     
     def _initialize_chat_id(self) -> None:
         """Инициализирует chat_id из БД или получает его от пользователя"""
@@ -209,12 +215,11 @@ class OrderMonitor:
             sys.stderr.flush()
     
     def _check_and_send_daily_report(self) -> None:
-        """Проверяет время и отправляет ежедневный отчет в 00:00"""
+        """Проверяет время и отправляет ежедневные отчеты в 00:00 и 00:05"""
         now = datetime.utcnow()
         current_date = now.date()
         
-        # Проверяем, наступила ли полночь (00:00-00:05) - расширенный диапазон
-        # чтобы не пропустить момент, если проверка происходит не точно в 00:00
+        # Отчет о заказах в 00:00-00:05
         if now.hour == 0 and now.minute <= 5:
             # Отправляем отчет только один раз за день
             if self.last_daily_report_date != current_date:
@@ -234,10 +239,44 @@ class OrderMonitor:
                 
                 # Обновляем дату последнего отчета
                 self.last_daily_report_date = current_date
+        
+        # Отчет о просмотрах карточек в 00:05-00:10
+        if now.hour == 0 and 5 <= now.minute <= 10:
+            # Отправляем отчет только один раз за день
+            if self.last_views_report_date != current_date and self.analytics_client:
+                # Получаем статистику просмотров за вчерашний день
+                yesterday = current_date - timedelta(days=1)
+                yesterday_str = yesterday.strftime('%Y-%m-%d')
+                
+                try:
+                    self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
+                    sys.stdout.flush()
+                    views_stats = self.analytics_client.get_product_views_for_date(yesterday_str)
+                    
+                    if views_stats:
+                        self.logger.info(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")
+                        sys.stdout.flush()
+                        if self.telegram_bot.send_product_views_report(views_stats, yesterday_str):
+                            self.logger.info("Отчет о просмотрах успешно отправлен")
+                        else:
+                            self.logger.warning("Не удалось отправить отчет о просмотрах")
+                    else:
+                        self.logger.info(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
+                    sys.stdout.flush()
+                    
+                    # Обновляем дату последнего отчета
+                    self.last_views_report_date = current_date
+                except Exception as e:
+                    self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
+                    sys.stdout.flush()
+                    sys.stderr.flush()
         else:
-            # Сбрасываем дату отчета, если уже не полночь (после 00:05)
-            if self.last_daily_report_date == current_date and (now.hour != 0 or now.minute > 5):
-                self.last_daily_report_date = None
+            # Сбрасываем дату отчета, если уже не время отчета (после 00:10)
+            if now.hour != 0 or now.minute > 10:
+                if self.last_daily_report_date == current_date:
+                    self.last_daily_report_date = None
+                if self.last_views_report_date == current_date:
+                    self.last_views_report_date = None
     
     def get_statistics(self) -> dict:
         """

@@ -3,7 +3,7 @@
 """
 import logging
 import time
-from typing import Optional
+from typing import Optional, Dict
 import requests
 
 
@@ -181,6 +181,60 @@ class TelegramBot:
             bool: True если сообщение отправлено успешно, False иначе
         """
         message = self.format_daily_statistics(orders_count, date)
+        return self.send_message(message, max_retries=3, retry_delay=5)
+    
+    def format_product_views_report(self, views_stats: Dict[str, int], date: str = None) -> str:
+        """
+        Форматирует отчет о просмотрах карточек товаров
+        
+        Args:
+            views_stats: Словарь {vendorCode: openCount}
+            date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
+            
+        Returns:
+            str: Отформатированное сообщение
+        """
+        import datetime
+        
+        if date is None:
+            date_obj = datetime.datetime.utcnow().date()
+        else:
+            date_obj = datetime.datetime.strptime(date, '%Y-%m-%d').date()
+        
+        date_str = date_obj.strftime('%d.%m.%Y')
+        
+        if not views_stats:
+            message = f"📊 <b>Просмотры карточек за {date_str}</b>\n\n😔 Просмотров не было"
+        else:
+            # Сортируем по количеству просмотров (по убыванию)
+            sorted_stats = sorted(views_stats.items(), key=lambda x: x[1], reverse=True)
+            
+            message = f"📊 <b>Просмотры карточек за {date_str}</b>\n\n"
+            for vendor_code, count in sorted_stats:
+                # Определяем правильную форму слова "раз"
+                if count % 10 == 1 and count % 100 != 11:
+                    times_word = "раз"
+                elif count % 10 in [2, 3, 4] and count % 100 not in [12, 13, 14]:
+                    times_word = "раза"
+                else:
+                    times_word = "раз"
+                
+                message += f"<b>{vendor_code}</b> - {count} {times_word}\n"
+        
+        return message.strip()
+    
+    def send_product_views_report(self, views_stats: Dict[str, int], date: str = None) -> bool:
+        """
+        Отправляет отчет о просмотрах карточек товаров
+        
+        Args:
+            views_stats: Словарь {vendorCode: openCount}
+            date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
+            
+        Returns:
+            bool: True если сообщение отправлено успешно, False иначе
+        """
+        message = self.format_product_views_report(views_stats, date)
         return self.send_message(message, max_retries=3, retry_delay=5)
     
     def test_connection(self) -> bool:

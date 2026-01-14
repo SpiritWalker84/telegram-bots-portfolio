@@ -1,0 +1,124 @@
+"""
+Модуль для работы с Analytics API Wildberries
+"""
+import requests
+import logging
+from typing import List, Dict, Optional
+from datetime import datetime, timedelta
+
+
+class WBAnalyticsClient:
+    """Класс для работы с Analytics API Wildberries"""
+    
+    def __init__(self, api_key: str):
+        """
+        Инициализация клиента Analytics API
+        
+        Args:
+            api_key: API ключ для авторизации
+        """
+        self.api_key = api_key
+        self.base_url = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/grouped/history"
+        self.logger = logging.getLogger(__name__)
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        })
+    
+    def get_product_views_for_date(self, date: str = None, max_retries: int = 3, retry_delay: int = 10) -> Dict[str, int]:
+        """
+        Получает количество просмотров карточек товаров за указанную дату
+        
+        Args:
+            date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
+            max_retries: Максимальное количество попыток
+            retry_delay: Задержка между попытками в секундах
+            
+        Returns:
+            Dict[str, int]: Словарь {vendorCode: openCount}, только с ненулевыми значениями
+        """
+        import time
+        
+        if date is None:
+            date = datetime.utcnow().strftime('%Y-%m-%d')
+        
+        # Формируем запрос для одного дня
+        payload = {
+            "selectedPeriod": {
+                "start": date,
+                "end": date
+            },
+            "skipDeletedNm": False,
+            "aggregationLevel": "day"
+        }
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.logger.info(f"Запрос статистики просмотров за {date} (попытка {attempt}/{max_retries})")
+                response = self.session.post(self.base_url, json=payload, timeout=30)
+                response.raise_for_status()
+                
+                data = response.json()
+                products_data = data.get("data", [])
+                
+                # Собираем статистику просмотров
+                views_stats = {}
+                for product_data in products_data:
+                    product = product_data.get("product", {})
+                    vendor_code = product.get("vendorCode", "")
+                    history = product_data.get("history", [])
+                    
+                    # Берем данные за указанную дату
+                    for day_data in history:
+                        if day_data.get("date") == date:
+                            open_count = day_data.get("openCount", 0)
+                            if open_count > 0 and vendor_code:
+                                views_stats[vendor_code] = open_count
+                            break
+                
+                self.logger.info(f"Получена статистика просмотров: {len(views_stats)} карточек с просмотрами")
+                return views_stats
+                
+            except requests.exceptions.Timeout:
+                self.logger.warning(f"Таймаут при запросе к Analytics API (попытка {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    self.logger.info(f"Повторная попытка через {retry_delay} секунд...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except requests.exceptions.ConnectionError as e:
+                self.logger.warning(f"Ошибка соединения с Analytics API (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    self.logger.info(f"Повторная попытка через {retry_delay} секунд...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Ошибка при запросе к Analytics API (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    self.logger.info(f"Повторная попытка через {retry_delay} секунд...")
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except Exception as e:
+                self.logger.error(f"Неожиданная ошибка при обработке ответа Analytics API: {e}")
+                raise
+        
+        return {}
+    
+    def test_connection(self) -> bool:
+        """
+        Проверяет соединение с Analytics API
+        
+        Returns:
+            bool: True если соединение успешно, False иначе
+        """
+        try:
+            # Пробуем получить данные за вчерашний день
+            yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+            self.get_product_views_for_date(yesterday)
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка при проверке соединения с Analytics API: {e}")
+            return False
