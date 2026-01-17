@@ -72,8 +72,9 @@ try:
         import traceback
         traceback.print_exc()
     
-    print(f"\n   Запрос статистики просмотров с nmIds: {len(nm_ids) if nm_ids else 0} товаров")
-    views_stats = analytics_client.get_product_views_for_date(yesterday, nm_ids=nm_ids)
+    print(f"\n   Запрос детализированной статистики просмотров...")
+    # Используем новый метод для получения детализации
+    views_stats = analytics_client.get_product_views_detailed_for_date(yesterday, nm_ids=None)
     print(f"   ✓ Получено данных: {len(views_stats)} карточек с просмотрами")
     
     if views_stats:
