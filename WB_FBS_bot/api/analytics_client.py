@@ -73,15 +73,12 @@ class WBAnalyticsClient:
                 for product_data in products_data:
                     total_products += 1
                     product = product_data.get("product", {})
-                    vendor_code = product.get("vendorCode", "")
+                    vendor_code = product.get("vendorCode", "").strip()
+                    nm_id = product.get("nmId")
                     history = product_data.get("history", [])
                     
-                    if not vendor_code:
-                        self.logger.debug(f"Пропущен продукт без vendorCode: {product.get('nmId', 'N/A')}")
-                        continue
-                    
                     if not history:
-                        self.logger.debug(f"Продукт {vendor_code} без истории")
+                        self.logger.debug(f"Продукт без истории: nmId={nm_id}, vendorCode={vendor_code}")
                         continue
                     
                     products_with_history += 1
@@ -91,13 +88,30 @@ class WBAnalyticsClient:
                         day_date = day_data.get("date")
                         if day_date == date:
                             open_count = day_data.get("openCount", 0)
-                            self.logger.debug(f"Продукт {vendor_code}, дата {day_date}, openCount: {open_count}")
+                            
+                            # Если vendorCode пустой, используем nmId или "Общее"
+                            if not vendor_code:
+                                if nm_id and nm_id > 0:
+                                    identifier = f"nmId_{nm_id}"
+                                else:
+                                    # Агрегированные данные - показываем как "Общее"
+                                    identifier = "Общее"
+                            else:
+                                identifier = vendor_code
+                            
+                            self.logger.debug(f"Продукт {identifier}, дата {day_date}, openCount: {open_count}")
+                            
                             if open_count > 0:
-                                views_stats[vendor_code] = open_count
+                                # Если уже есть запись с таким идентификатором, суммируем
+                                if identifier in views_stats:
+                                    views_stats[identifier] += open_count
+                                else:
+                                    views_stats[identifier] = open_count
                             break
                     else:
                         # Если не нашли данные за нужную дату
-                        self.logger.debug(f"Продукт {vendor_code} - нет данных за {date}, доступные даты: {[d.get('date') for d in history]}")
+                        identifier = vendor_code or (f"nmId_{nm_id}" if nm_id else "N/A")
+                        self.logger.debug(f"Продукт {identifier} - нет данных за {date}, доступные даты: {[d.get('date') for d in history]}")
                 
                 self.logger.info(f"Обработано продуктов: {total_products}, с историей: {products_with_history}, с просмотрами: {len(views_stats)}")
                 
