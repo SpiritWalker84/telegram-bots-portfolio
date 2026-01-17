@@ -191,10 +191,10 @@ class WBAnalyticsClient:
             self.logger.warning("nmIds не указаны. Нужно получить список товаров через Content API.")
             return {}
         
-        # Ограничиваем до 20 артикулов за запрос (лимит API)
-        if len(nm_ids) > 20:
-            self.logger.warning(f"Слишком много nmIds ({len(nm_ids)}), используем первые 20")
-            nm_ids = nm_ids[:20]
+        # Ограничиваем до 100 артикулов за запрос (лимит API)
+        if len(nm_ids) > 100:
+            self.logger.warning(f"Слишком много nmIds ({len(nm_ids)}), используем первые 100")
+            nm_ids = nm_ids[:100]
         
         # Формируем запрос с selectedPeriod (как требует API)
         payload = {

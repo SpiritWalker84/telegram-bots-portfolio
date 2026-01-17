@@ -280,17 +280,17 @@ class OrderMonitor:
                             nm_to_vendor = {card.get("nmID"): card.get("vendorCode", "").strip() 
                                           for card in cards if card.get("nmID") and card.get("vendorCode")}
                             
-                            # Если товаров больше 20, делаем несколько запросов
-                            if len(nm_ids) > 20:
-                                self.logger.info(f"Товаров больше 20 ({len(nm_ids)}), делаем запросы батчами по 20")
+                            # Если товаров больше 100, делаем несколько запросов
+                            if len(nm_ids) > 100:
+                                self.logger.info(f"Товаров больше 100 ({len(nm_ids)}), делаем запросы батчами по 100")
                                 all_views_stats = {}
                                 
-                            for i in range(0, len(nm_ids), 20):
-                                batch_nm_ids = nm_ids[i:i+20]
-                                
-                                # Задержка между батчами для избежания rate limiting
-                                if i > 0:
-                                    time.sleep(5)  # 5 секунд задержка
+                                for i in range(0, len(nm_ids), 100):
+                                    batch_nm_ids = nm_ids[i:i+100]
+                                    
+                                    # Задержка между батчами для избежания rate limiting
+                                    if i > 0:
+                                        time.sleep(5)  # 5 секунд задержка
                                 
                                 batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
                                     
