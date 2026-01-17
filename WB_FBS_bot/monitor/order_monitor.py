@@ -267,8 +267,66 @@ class OrderMonitor:
                     self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
                     sys.stdout.flush()
                     
-                    # Используем новый endpoint для получения детализированной статистики
-                    views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=None)
+                    # Получаем список товаров для запроса (API требует nmIds, до 20 за раз)
+                    nm_ids = None
+                    if self.content_client:
+                        try:
+                            self.logger.debug("Получение списка товаров для запроса статистики...")
+                            cards = self.content_client.get_all_cards()
+                            nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
+                            self.logger.debug(f"Получено {len(nm_ids)} nmIds")
+                            
+                            # Создаем маппинг nmId -> vendorCode для замены в отчете
+                            nm_to_vendor = {card.get("nmID"): card.get("vendorCode", "").strip() 
+                                          for card in cards if card.get("nmID") and card.get("vendorCode")}
+                            
+                            # Если товаров больше 20, делаем несколько запросов
+                            if len(nm_ids) > 20:
+                                self.logger.info(f"Товаров больше 20 ({len(nm_ids)}), делаем запросы батчами по 20")
+                                all_views_stats = {}
+                                
+                                for i in range(0, len(nm_ids), 20):
+                                    batch_nm_ids = nm_ids[i:i+20]
+                                    batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
+                                    
+                                    # Заменяем nmId_* на vendorCode если есть маппинг
+                                    for key, value in batch_stats.items():
+                                        if key.startswith("nmId_"):
+                                            nm_id = int(key.replace("nmId_", ""))
+                                            vendor_code = nm_to_vendor.get(nm_id)
+                                            if vendor_code:
+                                                if vendor_code in all_views_stats:
+                                                    all_views_stats[vendor_code] += value
+                                                else:
+                                                    all_views_stats[vendor_code] = value
+                                            else:
+                                                all_views_stats[key] = value
+                                        else:
+                                            if key in all_views_stats:
+                                                all_views_stats[key] += value
+                                            else:
+                                                all_views_stats[key] = value
+                                
+                                views_stats = all_views_stats
+                            else:
+                                views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=nm_ids)
+                                
+                                # Заменяем nmId_* на vendorCode
+                                final_stats = {}
+                                for key, value in views_stats.items():
+                                    if key.startswith("nmId_"):
+                                        nm_id = int(key.replace("nmId_", ""))
+                                        vendor_code = nm_to_vendor.get(nm_id, key)
+                                        final_stats[vendor_code] = value
+                                    else:
+                                        final_stats[key] = value
+                                views_stats = final_stats
+                        except Exception as e:
+                            self.logger.warning(f"Не удалось получить список товаров: {e}")
+                            views_stats = {}
+                    else:
+                        self.logger.warning("Content API клиент не инициализирован, невозможно получить список товаров")
+                        views_stats = {}
                     
                     if views_stats:
                         self.logger.info(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")

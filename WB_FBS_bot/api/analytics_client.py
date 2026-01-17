@@ -19,7 +19,9 @@ class WBAnalyticsClient:
         """
         self.api_key = api_key
         self.base_url_grouped = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/grouped/history"
-        self.base_url_products = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history"
+        # Пробуем оба варианта URL
+        self.base_url_products_v1 = "https://analytics-api.wildberries.ru/api/v3/sales-funnel/products/history"
+        self.base_url_products_v2 = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history"
         self.logger = logging.getLogger(__name__)
         self.session = requests.Session()
         self.session.headers.update({
