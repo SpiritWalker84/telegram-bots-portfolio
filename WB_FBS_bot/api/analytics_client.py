@@ -44,19 +44,19 @@ class WBAnalyticsClient:
         if date is None:
             date = datetime.utcnow().strftime('%Y-%m-%d')
         
-        # Формируем запрос для одного дня
+        # Формируем запрос для одного дня с группировкой по vendorCode
         payload = {
             "selectedPeriod": {
                 "start": date,
                 "end": date
             },
             "skipDeletedNm": False,
-            "aggregationLevel": "day"
+            "aggregationLevel": "day",
+            "groupBySa": True  # Группировка по артикулам продавца (vendorCode)
         }
         
-        # Если указаны vendorCode, можно попробовать использовать их для фильтрации
-        # Но это может не работать, если API не поддерживает такую фильтрацию
-        # Оставляем как есть для текущей реализации
+        # Если указаны vendorCode через nmIds (можно попробовать, но сначала без фильтрации)
+        # nmIds принимает массив nmId, не vendorCode, поэтому это не поможет напрямую
         
         for attempt in range(1, max_retries + 1):
             try:
