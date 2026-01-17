@@ -210,16 +210,29 @@ class TelegramBot:
             sorted_stats = sorted(views_stats.items(), key=lambda x: x[1], reverse=True)
             
             message = f"📊 <b>Просмотры карточек за {date_str}</b>\n\n"
-            for vendor_code, count in sorted_stats:
-                # Определяем правильную форму слова "раз"
+            
+            # Если только один элемент "Общее", делаем более читаемый формат
+            if len(sorted_stats) == 1 and sorted_stats[0][0] == "Общее":
+                count = sorted_stats[0][1]
                 if count % 10 == 1 and count % 100 != 11:
                     times_word = "раз"
                 elif count % 10 in [2, 3, 4] and count % 100 not in [12, 13, 14]:
                     times_word = "раза"
                 else:
                     times_word = "раз"
-                
-                message += f"<b>{vendor_code}</b> - {count} {times_word}\n"
+                message += f"Всего просмотров: <b>{count}</b> {times_word}"
+            else:
+                # Выводим список по товарам
+                for vendor_code, count in sorted_stats:
+                    # Определяем правильную форму слова "раз"
+                    if count % 10 == 1 and count % 100 != 11:
+                        times_word = "раз"
+                    elif count % 10 in [2, 3, 4] and count % 100 not in [12, 13, 14]:
+                        times_word = "раза"
+                    else:
+                        times_word = "раз"
+                    
+                    message += f"<b>{vendor_code}</b> - {count} {times_word}\n"
         
         return message.strip()
     
