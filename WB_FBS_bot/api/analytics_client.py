@@ -32,7 +32,7 @@ class WBAnalyticsClient:
         
         Args:
             date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
-            vendor_codes: Опциональный список vendorCode для фильтрации (может помочь получить детализацию)
+            nm_ids: Опциональный список nmId для фильтрации (может помочь получить детализацию)
             max_retries: Максимальное количество попыток
             retry_delay: Задержка между попытками в секундах
             
@@ -51,12 +51,19 @@ class WBAnalyticsClient:
                 "end": date
             },
             "skipDeletedNm": False,
-            "aggregationLevel": "day",
-            "groupBySa": True  # Группировка по артикулам продавца (vendorCode)
+            "aggregationLevel": "day"
         }
         
-        # Если указаны vendorCode через nmIds (можно попробовать, но сначала без фильтрации)
-        # nmIds принимает массив nmId, не vendorCode, поэтому это не поможет напрямую
+        # Пробуем разные варианты параметра группировки
+        # Вариант 1: groupBySa (может не работать)
+        payload["groupBySa"] = True
+        
+        # Если указаны nmIds, добавляем их для фильтрации
+        if nm_ids:
+            payload["nmIds"] = nm_ids
+            self.logger.debug(f"Используется фильтрация по nmIds: {len(nm_ids)} товаров")
+        
+        self.logger.debug(f"Payload запроса: {payload}")
         
         for attempt in range(1, max_retries + 1):
             try:
