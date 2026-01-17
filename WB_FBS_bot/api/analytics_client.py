@@ -198,11 +198,14 @@ class WBAnalyticsClient:
             self.logger.warning(f"Слишком много nmIds ({len(nm_ids)}), используем первые 20")
             nm_ids = nm_ids[:20]
         
-        # Формируем запрос в формате, который описан в документации
+        # Формируем запрос с selectedPeriod (как требует API)
         payload = {
             "nmIds": nm_ids,
-            "dateFrom": date,
-            "dateTo": date,
+            "selectedPeriod": {
+                "start": date,
+                "end": date
+            },
+            "skipDeletedNm": True,
             "aggregationLevel": "day"
         }
         
