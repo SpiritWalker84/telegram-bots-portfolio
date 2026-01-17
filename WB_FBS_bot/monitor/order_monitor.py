@@ -32,9 +32,13 @@ class OrderMonitor:
         self.wb_client = WBAPIClient(config.wb_api_key, config.wb_api_url)
         self.telegram_bot = TelegramBot(config.telegram_bot_token, config.telegram_chat_id)
         
-        # Инициализация Analytics API (если указан ключ)
+        # Инициализация Analytics API и Content API (если указан ключ)
         analytics_api_key = config.wb_analytics_api_key or config.wb_api_key
         self.analytics_client = WBAnalyticsClient(analytics_api_key) if analytics_api_key else None
+        
+        # Content API для получения списка товаров (используется для лучшего отображения)
+        from api.content_client import WBContentClient
+        self.content_client = WBContentClient(config.wb_api_key) if config.wb_api_key else None
         
         # Получаем или устанавливаем chat_id
         self._initialize_chat_id()
@@ -262,6 +266,9 @@ class OrderMonitor:
                 try:
                     self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
                     sys.stdout.flush()
+                    
+                    # Получаем список vendorCode для лучшего отображения (опционально)
+                    # Пока оставляем как есть - API сам должен возвращать детализацию
                     views_stats = self.analytics_client.get_product_views_for_date(yesterday_str)
                     
                     if views_stats:

@@ -26,12 +26,13 @@ class WBAnalyticsClient:
             "Content-Type": "application/json"
         })
     
-    def get_product_views_for_date(self, date: str = None, max_retries: int = 3, retry_delay: int = 10) -> Dict[str, int]:
+    def get_product_views_for_date(self, date: str = None, vendor_codes: Optional[List[str]] = None, max_retries: int = 3, retry_delay: int = 10) -> Dict[str, int]:
         """
         Получает количество просмотров карточек товаров за указанную дату
         
         Args:
             date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
+            vendor_codes: Опциональный список vendorCode для фильтрации (может помочь получить детализацию)
             max_retries: Максимальное количество попыток
             retry_delay: Задержка между попытками в секундах
             
@@ -52,6 +53,10 @@ class WBAnalyticsClient:
             "skipDeletedNm": False,
             "aggregationLevel": "day"
         }
+        
+        # Если указаны vendorCode, можно попробовать использовать их для фильтрации
+        # Но это может не работать, если API не поддерживает такую фильтрацию
+        # Оставляем как есть для текущей реализации
         
         for attempt in range(1, max_retries + 1):
             try:
