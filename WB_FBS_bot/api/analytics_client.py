@@ -214,16 +214,25 @@ class WBAnalyticsClient:
                 
                 # Пробуем оба варианта URL
                 response = None
+                last_error = None
                 for base_url in [self.base_url_products_v1, self.base_url_products_v2]:
                     try:
                         response = self.session.post(base_url, json=payload, timeout=30)
                         if response.status_code == 200:
                             break
-                    except:
+                        else:
+                            # Сохраняем ошибку для логирования
+                            last_error = f"Status {response.status_code}: {response.text[:200]}"
+                            self.logger.warning(f"Ошибка при запросе к {base_url}: {last_error}")
+                    except Exception as e:
+                        last_error = str(e)
+                        self.logger.warning(f"Исключение при запросе к {base_url}: {e}")
                         continue
                 
-                if not response:
-                    raise requests.exceptions.RequestException("Не удалось получить ответ от API")
+                if not response or response.status_code != 200:
+                    error_msg = last_error or f"Status {response.status_code if response else 'None'}"
+                    self.logger.error(f"Не удалось получить успешный ответ от API: {error_msg}")
+                    raise requests.exceptions.RequestException(f"API вернул ошибку: {error_msg}")
                 response.raise_for_status()
                 
                 response.raise_for_status()
