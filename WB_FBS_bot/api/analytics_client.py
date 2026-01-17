@@ -188,70 +188,104 @@ class WBAnalyticsClient:
         if date is None:
             date = datetime.utcnow().strftime('%Y-%m-%d')
         
-        # Формируем запрос для одного дня
+        # Нужны реальные nmIds для запроса (до 20 артикулов за раз)
+        if not nm_ids or len(nm_ids) == 0:
+            self.logger.warning("nmIds не указаны. Нужно получить список товаров через Content API.")
+            return {}
+        
+        # Ограничиваем до 20 артикулов за запрос (лимит API)
+        if len(nm_ids) > 20:
+            self.logger.warning(f"Слишком много nmIds ({len(nm_ids)}), используем первые 20")
+            nm_ids = nm_ids[:20]
+        
+        # Формируем запрос в формате, который описан в документации
         payload = {
-            "selectedPeriod": {
-                "start": date,
-                "end": date
-            },
-            "skipDeletedNm": True,
+            "nmIds": nm_ids,
+            "dateFrom": date,
+            "dateTo": date,
             "aggregationLevel": "day"
         }
         
-        # Если указаны nmIds, используем их. Иначе не передаем nmIds (API вернет все товары)
-        if nm_ids and len(nm_ids) > 0:
-            payload["nmIds"] = nm_ids
-            self.logger.debug(f"Используется фильтрация по nmIds: {len(nm_ids)} товаров")
-        else:
-            # Не передаем nmIds - API вернет данные для всех товаров продавца
-            self.logger.debug("Запрашиваем все товары (без фильтрации по nmIds)")
+        self.logger.debug(f"Запрос для {len(nm_ids)} товаров за {date}")
         
         for attempt in range(1, max_retries + 1):
             try:
                 self.logger.info(f"Запрос детализированной статистики просмотров за {date} (попытка {attempt}/{max_retries})")
-                response = self.session.post(self.base_url_products, json=payload, timeout=30)
+                
+                # Пробуем оба варианта URL
+                response = None
+                for base_url in [self.base_url_products_v1, self.base_url_products_v2]:
+                    try:
+                        response = self.session.post(base_url, json=payload, timeout=30)
+                        if response.status_code == 200:
+                            break
+                    except:
+                        continue
+                
+                if not response:
+                    raise requests.exceptions.RequestException("Не удалось получить ответ от API")
                 response.raise_for_status()
                 
-                # Ответ - это массив объектов, а не объект с data
-                products_data = response.json()
+                response.raise_for_status()
                 
-                self.logger.debug(f"Полный ответ API (первые 500 символов): {str(products_data)[:500]}")
-                self.logger.debug(f"Получено продуктов в ответе: {len(products_data)}")
+                # Ответ в формате {"data": [...]} или просто массив
+                response_data = response.json()
                 
-                # Собираем статистику просмотров
+                # Проверяем структуру ответа
+                if isinstance(response_data, dict) and "data" in response_data:
+                    data = response_data["data"]
+                elif isinstance(response_data, list):
+                    data = response_data
+                else:
+                    self.logger.error(f"Неожиданная структура ответа: {type(response_data)}")
+                    return {}
+                
+                self.logger.debug(f"Полный ответ API (первые 500 символов): {str(data)[:500]}")
+                self.logger.debug(f"Получено записей в ответе: {len(data)}")
+                
+                # Если структура ответа: [{"nmId": 1522, "date": "2026-01-16", "shows": 22}]
                 views_stats = {}
                 
-                for product_data in products_data:
-                    product = product_data.get("product", {})
-                    vendor_code = product.get("vendorCode", "").strip()
-                    nm_id = product.get("nmId")
-                    history = product_data.get("history", [])
+                for item in data:
+                    nm_id = item.get("nmId")
+                    shows = item.get("shows", 0)  # Поле называется "shows", не "openCount"
+                    item_date = item.get("date")
                     
-                    if not vendor_code:
-                        self.logger.debug(f"Пропущен продукт без vendorCode: nmId={nm_id}")
+                    if item_date != date:
                         continue
                     
-                    if not history:
-                        self.logger.debug(f"Продукт {vendor_code} без истории")
-                        continue
-                    
-                    # Берем данные за указанную дату
-                    for day_data in history:
-                        day_date = day_data.get("date")
-                        if day_date == date:
-                            open_count = day_data.get("openCount", 0)
-                            
-                            self.logger.debug(f"Продукт {vendor_code}, дата {day_date}, openCount: {open_count}")
-                            
-                            if open_count > 0:
-                                # Если уже есть запись с таким vendorCode, суммируем
-                                if vendor_code in views_stats:
-                                    views_stats[vendor_code] += open_count
-                                else:
-                                    views_stats[vendor_code] = open_count
-                            break
+                    if shows > 0:
+                        # Пока используем nmId, потом можно заменить на vendorCode
+                        identifier = f"nmId_{nm_id}"
+                        views_stats[identifier] = shows
+                        self.logger.debug(f"nmId {nm_id}, дата {item_date}, shows: {shows}")
                 
-                self.logger.info(f"Обработано продуктов: {len(products_data)}, с просмотрами: {len(views_stats)}")
+                # Если структура ответа: [{"product": {...}, "history": [...]}] (старый формат)
+                if not views_stats and data:
+                    for product_data in data:
+                        product = product_data.get("product", {})
+                        vendor_code = product.get("vendorCode", "").strip()
+                        nm_id = product.get("nmId")
+                        history = product_data.get("history", [])
+                        
+                        if not vendor_code and nm_id:
+                            vendor_code = f"nmId_{nm_id}"
+                        
+                        if not history:
+                            continue
+                        
+                        for day_data in history:
+                            day_date = day_data.get("date")
+                            if day_date == date:
+                                open_count = day_data.get("openCount", day_data.get("shows", 0))
+                                if open_count > 0:
+                                    if vendor_code in views_stats:
+                                        views_stats[vendor_code] += open_count
+                                    else:
+                                        views_stats[vendor_code] = open_count
+                                break
+                
+                self.logger.info(f"Обработано записей: {len(data)}, с просмотрами: {len(views_stats)}")
                 
                 return views_stats
                 
