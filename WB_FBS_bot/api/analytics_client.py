@@ -196,14 +196,13 @@ class WBAnalyticsClient:
             "aggregationLevel": "day"
         }
         
-        # Если указаны nmIds, используем их. Иначе запрашиваем все (можно передать [0] или не передавать)
+        # Если указаны nmIds, используем их. Иначе не передаем nmIds (API вернет все товары)
         if nm_ids and len(nm_ids) > 0:
             payload["nmIds"] = nm_ids
             self.logger.debug(f"Используется фильтрация по nmIds: {len(nm_ids)} товаров")
         else:
-            # Если не указаны nmIds, передаем [0] чтобы получить все товары
-            payload["nmIds"] = [0]
-            self.logger.debug("Запрашиваем все товары (nmIds: [0])")
+            # Не передаем nmIds - API вернет данные для всех товаров продавца
+            self.logger.debug("Запрашиваем все товары (без фильтрации по nmIds)")
         
         for attempt in range(1, max_retries + 1):
             try:
