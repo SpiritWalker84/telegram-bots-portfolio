@@ -111,9 +111,13 @@ try:
             else:
                 all_views_stats[key] = value
         
-        # Если нашли просмотры в этом батче, продолжаем дальше
+        # Показываем прогресс
+        total_views_found = sum(all_views_stats.values())
         if batch_stats:
-            print(f"   ✓ В батче {batch_num} найдено просмотров: {sum(batch_stats.values())}")
+            batch_views = sum(batch_stats.values())
+            print(f"   ✓ В батче {batch_num} найдено: {batch_views} просмотров (всего: {total_views_found})")
+        else:
+            print(f"   ⚪ В батче {batch_num} просмотров нет (всего найдено: {total_views_found})")
     
     views_stats = all_views_stats
     
