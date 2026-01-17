@@ -221,6 +221,7 @@ class OrderMonitor:
         
         # Отчет о заказах в 00:00-00:05
         if now.hour == 0 and now.minute <= 5:
+            self.logger.debug(f"Проверка времени для отчета о заказах: {now.hour}:{now.minute:02d}")
             # Отправляем отчет только один раз за день
             if self.last_daily_report_date != current_date:
                 # Получаем статистику за вчерашний день
@@ -242,6 +243,8 @@ class OrderMonitor:
         
         # Отчет о просмотрах карточек в 00:05-00:10
         if now.hour == 0 and 5 <= now.minute <= 10:
+            self.logger.debug(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d}, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+            
             # Проверяем, что analytics_client инициализирован
             if not self.analytics_client:
                 if self.last_views_report_date != current_date:
@@ -251,6 +254,7 @@ class OrderMonitor:
             
             # Отправляем отчет только один раз за день
             if self.last_views_report_date != current_date:
+                self.logger.debug(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
                 # Получаем статистику просмотров за вчерашний день
                 yesterday = current_date - timedelta(days=1)
                 yesterday_str = yesterday.strftime('%Y-%m-%d')
