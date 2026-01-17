@@ -26,7 +26,7 @@ class WBAnalyticsClient:
             "Content-Type": "application/json"
         })
     
-    def get_product_views_for_date(self, date: str = None, vendor_codes: Optional[List[str]] = None, max_retries: int = 3, retry_delay: int = 10) -> Dict[str, int]:
+    def get_product_views_for_date(self, date: str = None, nm_ids: Optional[List[int]] = None, max_retries: int = 3, retry_delay: int = 10) -> Dict[str, int]:
         """
         Получает количество просмотров карточек товаров за указанную дату
         
