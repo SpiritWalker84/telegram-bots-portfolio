@@ -55,9 +55,46 @@ try:
     today = datetime.utcnow().strftime('%Y-%m-%d')
     print(f"\n   Также проверяем сегодняшнюю дату: {today}")
     
+    print(f"\n   Получение списка товаров для запроса...")
+    # Получаем список товаров через Content API
+    nm_ids = None
+    try:
+        from api.content_client import WBContentClient
+        content_client = WBContentClient(config.wb_api_key)
+        cards = content_client.get_all_cards()
+        nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
+        print(f"   ✓ Получено {len(nm_ids)} nmIds")
+        
+        # Создаем маппинг nmId -> vendorCode
+        nm_to_vendor = {card.get("nmID"): card.get("vendorCode", "").strip() 
+                       for card in cards if card.get("nmID") and card.get("vendorCode")}
+        print(f"   ✓ Создан маппинг для {len(nm_to_vendor)} товаров")
+        
+        # Используем первые 20 для теста (лимит API)
+        if len(nm_ids) > 20:
+            print(f"   ⚠ Используем первые 20 товаров для теста (лимит API)")
+            nm_ids = nm_ids[:20]
+    except Exception as e:
+        print(f"   ✗ Ошибка при получении списка товаров: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+    
     print(f"\n   Запрос детализированной статистики просмотров...")
-    # Используем новый endpoint /products/history для получения детализации с vendorCode
-    views_stats = analytics_client.get_product_views_detailed_for_date(yesterday, nm_ids=None)
+    # Используем новый endpoint /products/history для получения детализации
+    views_stats = analytics_client.get_product_views_detailed_for_date(yesterday, nm_ids=nm_ids)
+    
+    # Заменяем nmId_* на vendorCode если есть маппинг
+    if 'nm_to_vendor' in locals():
+        final_stats = {}
+        for key, value in views_stats.items():
+            if key.startswith("nmId_"):
+                nm_id = int(key.replace("nmId_", ""))
+                vendor_code = nm_to_vendor.get(nm_id, key)
+                final_stats[vendor_code] = value
+            else:
+                final_stats[key] = value
+        views_stats = final_stats
     print(f"   ✓ Получено данных: {len(views_stats)} карточек с просмотрами")
     
     if views_stats:
