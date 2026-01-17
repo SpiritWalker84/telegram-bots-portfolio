@@ -70,10 +70,10 @@ try:
                        for card in cards if card.get("nmID") and card.get("vendorCode")}
         print(f"   ✓ Создан маппинг для {len(nm_to_vendor)} товаров")
         
-        # Используем первые 20 для теста (лимит API)
-        if len(nm_ids) > 20:
-            print(f"   ⚠ Используем первые 20 товаров для теста (лимит API)")
-            nm_ids = nm_ids[:20]
+        # Для теста запрашиваем все товары батчами (лимит API - 20 за раз)
+        # Но для полного теста лучше запросить больше
+        print(f"   📊 Всего товаров: {len(nm_ids)}")
+        print(f"   ⚠ API лимит: 20 товаров за запрос, запросим несколько батчей для поиска просмотров")
     except Exception as e:
         print(f"   ✗ Ошибка при получении списка товаров: {e}")
         import traceback
@@ -81,8 +81,43 @@ try:
         sys.exit(1)
     
     print(f"\n   Запрос детализированной статистики просмотров...")
-    # Используем новый endpoint /products/history для получения детализации
-    views_stats = analytics_client.get_product_views_detailed_for_date(yesterday, nm_ids=nm_ids)
+    # Запрашиваем батчами по 20 товаров, чтобы найти все просмотры
+    all_views_stats = {}
+    
+    batch_size = 20
+    total_batches = (len(nm_ids) + batch_size - 1) // batch_size
+    
+    for i in range(0, min(len(nm_ids), 200)):  # Ограничиваем до 200 товаров для теста (10 батчей)
+        batch_nm_ids = nm_ids[i:i+batch_size]
+        batch_num = (i // batch_size) + 1
+        
+        print(f"   Запрос батча {batch_num} ({len(batch_nm_ids)} товаров)...")
+        batch_stats = analytics_client.get_product_views_detailed_for_date(yesterday, nm_ids=batch_nm_ids)
+        
+        # Объединяем результаты
+        for key, value in batch_stats.items():
+            if key in all_views_stats:
+                all_views_stats[key] += value
+            else:
+                all_views_stats[key] = value
+        
+        # Если нашли просмотры в этом батче, продолжаем дальше
+        if batch_stats:
+            print(f"   ✓ В батче {batch_num} найдено просмотров: {sum(batch_stats.values())}")
+    
+    views_stats = all_views_stats
+    
+    # Заменяем nmId_* на vendorCode если есть маппинг
+    if 'nm_to_vendor' in locals():
+        final_stats = {}
+        for key, value in views_stats.items():
+            if key.startswith("nmId_"):
+                nm_id = int(key.replace("nmId_", ""))
+                vendor_code = nm_to_vendor.get(nm_id, key)
+                final_stats[vendor_code] = value
+            else:
+                final_stats[key] = value
+        views_stats = final_stats
     
     # Заменяем nmId_* на vendorCode если есть маппинг
     if 'nm_to_vendor' in locals():
