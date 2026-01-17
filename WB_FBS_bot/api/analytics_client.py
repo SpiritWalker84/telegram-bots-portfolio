@@ -227,6 +227,12 @@ class WBAnalyticsClient:
                     else:
                         raise requests.exceptions.RequestException("Превышен лимит запросов после нескольких попыток")
                 
+                # Логируем ошибки для отладки
+                if response.status_code != 200:
+                    error_text = response.text[:500] if response.text else "No error text"
+                    self.logger.error(f"Ошибка API (status {response.status_code}): {error_text}")
+                    self.logger.debug(f"Payload запроса: {payload}")
+                
                 response.raise_for_status()
                 
                 # Ответ в формате {"data": [...]} или просто массив
