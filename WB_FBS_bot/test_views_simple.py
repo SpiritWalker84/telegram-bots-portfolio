@@ -55,25 +55,8 @@ try:
     today = datetime.utcnow().strftime('%Y-%m-%d')
     print(f"\n   Также проверяем сегодняшнюю дату: {today}")
     
-    # Пробуем получить список товаров для детализации
-    nm_ids = None
-    try:
-        from api.content_client import WBContentClient
-        content_client = WBContentClient(config.wb_api_key)
-        print("\n   Получение списка товаров через Content API...")
-        cards = content_client.get_all_cards()
-        nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
-        print(f"   ✓ Получено {len(nm_ids)} nmIds для фильтрации")
-        if len(nm_ids) > 100:
-            print(f"   ⚠ Слишком много товаров, используем первые 100")
-            nm_ids = nm_ids[:100]
-    except Exception as e:
-        print(f"   ⚠ Не удалось получить список товаров: {e}")
-        import traceback
-        traceback.print_exc()
-    
     print(f"\n   Запрос детализированной статистики просмотров...")
-    # Используем новый метод для получения детализации
+    # Используем новый endpoint /products/history для получения детализации с vendorCode
     views_stats = analytics_client.get_product_views_detailed_for_date(yesterday, nm_ids=None)
     print(f"   ✓ Получено данных: {len(views_stats)} карточек с просмотрами")
     
