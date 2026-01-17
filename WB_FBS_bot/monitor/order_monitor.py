@@ -242,8 +242,15 @@ class OrderMonitor:
         
         # Отчет о просмотрах карточек в 00:05-00:10
         if now.hour == 0 and 5 <= now.minute <= 10:
+            # Проверяем, что analytics_client инициализирован
+            if not self.analytics_client:
+                if self.last_views_report_date != current_date:
+                    self.logger.warning("Analytics API клиент не инициализирован. Отчет о просмотрах не будет отправлен.")
+                    self.last_views_report_date = current_date  # Помечаем как обработанное, чтобы не спамить
+                return
+            
             # Отправляем отчет только один раз за день
-            if self.last_views_report_date != current_date and self.analytics_client:
+            if self.last_views_report_date != current_date:
                 # Получаем статистику просмотров за вчерашний день
                 yesterday = current_date - timedelta(days=1)
                 yesterday_str = yesterday.strftime('%Y-%m-%d')
@@ -264,7 +271,7 @@ class OrderMonitor:
                         self.logger.info(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
                     sys.stdout.flush()
                     
-                    # Обновляем дату последнего отчета
+                    # Обновляем дату последнего отчета (вне зависимости от наличия просмотров)
                     self.last_views_report_date = current_date
                 except Exception as e:
                     self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
