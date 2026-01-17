@@ -48,13 +48,32 @@ try:
     # Включаем DEBUG логирование для детальной информации
     import logging
     logging.getLogger('api.analytics_client').setLevel(logging.DEBUG)
+    logging.getLogger('api.content_client').setLevel(logging.DEBUG)
     logging.basicConfig(level=logging.DEBUG)
     
     # Пробуем также получить данные за сегодня (может быть доступнее)
     today = datetime.utcnow().strftime('%Y-%m-%d')
     print(f"\n   Также проверяем сегодняшнюю дату: {today}")
     
-    views_stats = analytics_client.get_product_views_for_date(yesterday)
+    # Пробуем получить список товаров для детализации
+    nm_ids = None
+    try:
+        from api.content_client import WBContentClient
+        content_client = WBContentClient(config.wb_api_key)
+        print("\n   Получение списка товаров через Content API...")
+        cards = content_client.get_all_cards()
+        nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
+        print(f"   ✓ Получено {len(nm_ids)} nmIds для фильтрации")
+        if len(nm_ids) > 100:
+            print(f"   ⚠ Слишком много товаров, используем первые 100")
+            nm_ids = nm_ids[:100]
+    except Exception as e:
+        print(f"   ⚠ Не удалось получить список товаров: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print(f"\n   Запрос статистики просмотров с nmIds: {len(nm_ids) if nm_ids else 0} товаров")
+    views_stats = analytics_client.get_product_views_for_date(yesterday, nm_ids=nm_ids)
     print(f"   ✓ Получено данных: {len(views_stats)} карточек с просмотрами")
     
     if views_stats:
