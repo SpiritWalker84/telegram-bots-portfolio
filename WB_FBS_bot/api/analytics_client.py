@@ -44,7 +44,7 @@ class WBAnalyticsClient:
         if date is None:
             date = datetime.utcnow().strftime('%Y-%m-%d')
         
-        # Формируем запрос для одного дня с группировкой по vendorCode
+        # Формируем запрос для одного дня
         payload = {
             "selectedPeriod": {
                 "start": date,
@@ -54,16 +54,16 @@ class WBAnalyticsClient:
             "aggregationLevel": "day"
         }
         
-        # Пробуем разные варианты параметра группировки
-        # Вариант 1: groupBySa (может не работать)
-        payload["groupBySa"] = True
+        # Пробуем разные варианты для получения детализации
+        # Вариант 1: groupBySa (не работает - API все равно возвращает агрегированные данные)
+        # payload["groupBySa"] = True
         
-        # Если указаны nmIds, добавляем их для фильтрации
+        # Вариант 2: передача nmIds для фильтрации (может помочь получить детализацию)
         if nm_ids and len(nm_ids) > 0:
             payload["nmIds"] = nm_ids
             self.logger.debug(f"Используется фильтрация по nmIds: {len(nm_ids)} товаров")
         
-        self.logger.debug(f"Payload запроса: {payload}")
+        self.logger.debug(f"Payload запроса (первые 200 символов): {str(payload)[:200]}")
         
         for attempt in range(1, max_retries + 1):
             try:

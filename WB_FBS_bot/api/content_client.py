@@ -56,6 +56,14 @@ class WBContentClient:
                 try:
                     self.logger.debug(f"Запрос карточек (попытка {attempt}/{max_retries}), limit: {cursor.get('limit', 100)}")
                     response = self.session.post(self.base_url, json=payload, timeout=30)
+                    
+                    # Обработка rate limiting
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', 10))
+                        self.logger.warning(f"Rate limit (429), ждем {retry_after} секунд...")
+                        time.sleep(retry_after)
+                        continue  # Повторяем попытку
+                    
                     response.raise_for_status()
                     
                     data = response.json()
