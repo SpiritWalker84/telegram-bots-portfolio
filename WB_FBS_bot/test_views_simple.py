@@ -86,10 +86,11 @@ try:
     batch_size = 20
     total_batches = (len(nm_ids) + batch_size - 1) // batch_size
     
-    # Для теста ограничиваем до 200 товаров (10 батчей)
-    max_products_for_test = min(len(nm_ids), 200)
+    print(f"   📦 Будет обработано батчей: {total_batches} (по {batch_size} товаров)")
+    print(f"   ⏱ Это займет примерно {total_batches * 5 / 60:.1f} минут с учетом задержек")
     
-    for i in range(0, max_products_for_test, batch_size):
+    # Обрабатываем все товары, не ограничиваем для теста
+    for i in range(0, len(nm_ids), batch_size):
         batch_nm_ids = nm_ids[i:i+batch_size]
         batch_num = (i // batch_size) + 1
         
