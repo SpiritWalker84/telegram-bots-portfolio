@@ -48,6 +48,11 @@ try:
     # Включаем DEBUG логирование для детальной информации
     import logging
     logging.getLogger('api.analytics_client').setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG)
+    
+    # Пробуем также получить данные за сегодня (может быть доступнее)
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    print(f"\n   Также проверяем сегодняшнюю дату: {today}")
     
     views_stats = analytics_client.get_product_views_for_date(yesterday)
     print(f"   ✓ Получено данных: {len(views_stats)} карточек с просмотрами")
