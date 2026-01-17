@@ -45,6 +45,10 @@ yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
 print(f"   Дата запроса: {yesterday}")
 
 try:
+    # Включаем DEBUG логирование для детальной информации
+    import logging
+    logging.getLogger('api.analytics_client').setLevel(logging.DEBUG)
+    
     views_stats = analytics_client.get_product_views_for_date(yesterday)
     print(f"   ✓ Получено данных: {len(views_stats)} карточек с просмотрами")
     
@@ -54,7 +58,8 @@ try:
         for vendor_code, count in sorted_stats[:5]:
             print(f"     {vendor_code}: {count} просмотров")
     else:
-        print("   ⚠ Просмотров не найдено (это нормально, если вчера не было просмотров)")
+        print("   ⚠ Просмотров не найдено")
+        print("   Проверьте логи выше для детальной информации о структуре ответа API")
         
 except Exception as e:
     print(f"   ✗ Ошибка: {e}")
