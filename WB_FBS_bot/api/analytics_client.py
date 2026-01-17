@@ -62,6 +62,7 @@ class WBAnalyticsClient:
                 data = response.json()
                 products_data = data.get("data", [])
                 
+                self.logger.debug(f"Полный ответ API (первые 500 символов): {str(data)[:500]}")
                 self.logger.debug(f"Получено продуктов в ответе: {len(products_data)}")
                 
                 # Собираем статистику просмотров
