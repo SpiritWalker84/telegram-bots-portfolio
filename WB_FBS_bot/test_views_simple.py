@@ -94,8 +94,9 @@ try:
         # Пропускаем если это не первый батч (чтобы избежать rate limiting)
         if i >= batch_size:
             import time
-            print(f"   ⏳ Задержка 2 секунды перед следующим батчем (избегаем rate limiting)...")
-            time.sleep(2)
+            delay = 5  # Увеличена задержка до 5 секунд
+            print(f"   ⏳ Задержка {delay} секунд перед следующим батчем (избегаем rate limiting)...")
+            time.sleep(delay)
         
         print(f"   Запрос батча {batch_num} ({len(batch_nm_ids)} товаров)...")
         batch_stats = analytics_client.get_product_views_detailed_for_date(yesterday, nm_ids=batch_nm_ids)
