@@ -19,9 +19,7 @@ class WBAnalyticsClient:
         """
         self.api_key = api_key
         self.base_url_grouped = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/grouped/history"
-        # Пробуем оба варианта URL
-        self.base_url_products_v1 = "https://analytics-api.wildberries.ru/api/v3/sales-funnel/products/history"
-        self.base_url_products_v2 = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history"
+        self.base_url_products = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history"
         self.logger = logging.getLogger(__name__)
         self.session = requests.Session()
         self.session.headers.update({
@@ -215,22 +213,31 @@ class WBAnalyticsClient:
             try:
                 self.logger.info(f"Запрос детализированной статистики просмотров за {date} (попытка {attempt}/{max_retries})")
                 
-                # Пробуем оба варианта URL
+                # Используем только рабочий URL (seller-analytics-api)
+                # analytics-api.wildberries.ru не существует
                 response = None
                 last_error = None
-                for base_url in [self.base_url_products_v1, self.base_url_products_v2]:
-                    try:
-                        response = self.session.post(base_url, json=payload, timeout=30)
-                        if response.status_code == 200:
-                            break
+                
+                try:
+                    response = self.session.post(self.base_url_products, json=payload, timeout=30)
+                    
+                    # Обработка rate limiting (429)
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', 30))
+                        self.logger.warning(f"Rate limit (429), ждем {retry_after} секунд...")
+                        time.sleep(retry_after)
+                        # Продолжаем в цикле попыток
+                        if attempt < max_retries:
+                            continue
                         else:
-                            # Сохраняем ошибку для логирования
-                            last_error = f"Status {response.status_code}: {response.text[:200]}"
-                            self.logger.warning(f"Ошибка при запросе к {base_url}: {last_error}")
-                    except Exception as e:
-                        last_error = str(e)
-                        self.logger.warning(f"Исключение при запросе к {base_url}: {e}")
-                        continue
+                            last_error = f"Status 429: Rate limit exceeded"
+                            self.logger.error(f"Превышен лимит запросов после {max_retries} попыток")
+                    elif response.status_code != 200:
+                        last_error = f"Status {response.status_code}: {response.text[:200]}"
+                        self.logger.warning(f"Ошибка при запросе к API: {last_error}")
+                except Exception as e:
+                    last_error = str(e)
+                    self.logger.warning(f"Исключение при запросе к API: {e}")
                 
                 if not response or response.status_code != 200:
                     error_msg = last_error or f"Status {response.status_code if response else 'None'}"
