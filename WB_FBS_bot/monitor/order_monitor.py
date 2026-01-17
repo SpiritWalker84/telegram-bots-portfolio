@@ -245,8 +245,8 @@ class OrderMonitor:
                 # Обновляем дату последнего отчета
                 self.last_daily_report_date = current_date
         
-        # Отчет о просмотрах карточек в 00:05-00:10
-        if now.hour == 0 and 5 <= now.minute <= 10:
+        # Отчет о просмотрах карточек в 05:00-05:05
+        if now.hour == 5 and now.minute <= 5:
             self.logger.debug(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d}, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
             
             # Проверяем, что analytics_client инициализирован
@@ -280,37 +280,44 @@ class OrderMonitor:
                             nm_to_vendor = {card.get("nmID"): card.get("vendorCode", "").strip() 
                                           for card in cards if card.get("nmID") and card.get("vendorCode")}
                             
-                            # Если товаров больше 20, делаем несколько запросов
-                            if len(nm_ids) > 20:
-                                self.logger.info(f"Товаров больше 20 ({len(nm_ids)}), делаем запросы батчами по 20")
+                            # Если товаров больше 20, делаем несколько запросов батчами
+                            batch_size = 20
+                            total_batches = (len(nm_ids) + batch_size - 1) // batch_size
+                            
+                            if len(nm_ids) > batch_size:
+                                self.logger.info(f"Товаров: {len(nm_ids)}, делаем запросы батчами по {batch_size} (всего {total_batches} батчей)")
                                 all_views_stats = {}
                                 
-                                for i in range(0, len(nm_ids), 20):
-                                    batch_nm_ids = nm_ids[i:i+20]
+                                for i in range(0, len(nm_ids), batch_size):
+                                    batch_nm_ids = nm_ids[i:i+batch_size]
+                                    batch_num = (i // batch_size) + 1
                                     
                                     # Задержка между батчами для избежания rate limiting
-                                    if i > 0:
-                                        time.sleep(5)  # 5 секунд задержка
-                                
-                                batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
+                                    if i >= batch_size:
+                                        delay = 5
+                                        self.logger.debug(f"Задержка {delay} секунд перед батчем {batch_num}...")
+                                        time.sleep(delay)
                                     
-                                    # Заменяем nmId_* на vendorCode если есть маппинг
+                                    self.logger.debug(f"Запрос батча {batch_num}/{total_batches} ({len(batch_nm_ids)} товаров)...")
+                                    batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
+                                    
+                                    # Объединяем результаты батча
                                     for key, value in batch_stats.items():
                                         if key.startswith("nmId_"):
                                             nm_id = int(key.replace("nmId_", ""))
                                             vendor_code = nm_to_vendor.get(nm_id)
                                             if vendor_code:
-                                                if vendor_code in all_views_stats:
-                                                    all_views_stats[vendor_code] += value
-                                                else:
-                                                    all_views_stats[vendor_code] = value
+                                                all_views_stats[vendor_code] = all_views_stats.get(vendor_code, 0) + value
                                             else:
-                                                all_views_stats[key] = value
+                                                all_views_stats[key] = all_views_stats.get(key, 0) + value
                                         else:
-                                            if key in all_views_stats:
-                                                all_views_stats[key] += value
-                                            else:
-                                                all_views_stats[key] = value
+                                            all_views_stats[key] = all_views_stats.get(key, 0) + value
+                                    
+                                    # Логируем прогресс
+                                    total_views_found = sum(all_views_stats.values())
+                                    batch_views = sum(batch_stats.values())
+                                    if batch_views > 0:
+                                        self.logger.debug(f"В батче {batch_num} найдено: {batch_views} просмотров (всего: {total_views_found})")
                                 
                                 views_stats = all_views_stats
                             else:
@@ -351,8 +358,8 @@ class OrderMonitor:
                     sys.stdout.flush()
                     sys.stderr.flush()
         else:
-            # Сбрасываем дату отчета, если уже не время отчета (после 00:10)
-            if now.hour != 0 or now.minute > 10:
+            # Сбрасываем дату отчета, если уже не время отчета (после 00:05 для заказов, после 05:05 для просмотров)
+            if (now.hour != 0 or now.minute > 5) and (now.hour != 5 or now.minute > 5):
                 if self.last_daily_report_date == current_date:
                     self.last_daily_report_date = None
                 if self.last_views_report_date == current_date:
