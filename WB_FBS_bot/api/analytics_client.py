@@ -18,7 +18,8 @@ class WBAnalyticsClient:
             api_key: API ключ для авторизации
         """
         self.api_key = api_key
-        self.base_url = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/grouped/history"
+        self.base_url_grouped = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/grouped/history"
+        self.base_url_products = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history"
         self.logger = logging.getLogger(__name__)
         self.session = requests.Session()
         self.session.headers.update({
@@ -68,7 +69,7 @@ class WBAnalyticsClient:
         for attempt in range(1, max_retries + 1):
             try:
                 self.logger.info(f"Запрос статистики просмотров за {date} (попытка {attempt}/{max_retries})")
-                response = self.session.post(self.base_url, json=payload, timeout=30)
+                response = self.session.post(self.base_url_grouped, json=payload, timeout=30)
                 response.raise_for_status()
                 
                 data = response.json()

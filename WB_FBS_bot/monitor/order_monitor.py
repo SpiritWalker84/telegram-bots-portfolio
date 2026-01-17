@@ -267,10 +267,8 @@ class OrderMonitor:
                     self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
                     sys.stdout.flush()
                     
-                    # Примечание: API Analytics не возвращает детализацию по товарам даже с nmIds
-                    # Возвращает только агрегированные данные. Поэтому не запрашиваем список товаров,
-                    # чтобы избежать rate limiting и лишних запросов.
-                    views_stats = self.analytics_client.get_product_views_for_date(yesterday_str, nm_ids=None)
+                    # Используем новый endpoint для получения детализированной статистики
+                    views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=None)
                     
                     if views_stats:
                         self.logger.info(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")
