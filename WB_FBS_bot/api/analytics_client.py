@@ -62,22 +62,54 @@ class WBAnalyticsClient:
                 data = response.json()
                 products_data = data.get("data", [])
                 
+                self.logger.debug(f"Получено продуктов в ответе: {len(products_data)}")
+                
                 # Собираем статистику просмотров
                 views_stats = {}
+                total_products = 0
+                products_with_history = 0
+                
                 for product_data in products_data:
+                    total_products += 1
                     product = product_data.get("product", {})
                     vendor_code = product.get("vendorCode", "")
                     history = product_data.get("history", [])
                     
+                    if not vendor_code:
+                        self.logger.debug(f"Пропущен продукт без vendorCode: {product.get('nmId', 'N/A')}")
+                        continue
+                    
+                    if not history:
+                        self.logger.debug(f"Продукт {vendor_code} без истории")
+                        continue
+                    
+                    products_with_history += 1
+                    
                     # Берем данные за указанную дату
                     for day_data in history:
-                        if day_data.get("date") == date:
+                        day_date = day_data.get("date")
+                        if day_date == date:
                             open_count = day_data.get("openCount", 0)
-                            if open_count > 0 and vendor_code:
+                            self.logger.debug(f"Продукт {vendor_code}, дата {day_date}, openCount: {open_count}")
+                            if open_count > 0:
                                 views_stats[vendor_code] = open_count
                             break
+                    else:
+                        # Если не нашли данные за нужную дату
+                        self.logger.debug(f"Продукт {vendor_code} - нет данных за {date}, доступные даты: {[d.get('date') for d in history]}")
                 
-                self.logger.info(f"Получена статистика просмотров: {len(views_stats)} карточек с просмотрами")
+                self.logger.info(f"Обработано продуктов: {total_products}, с историей: {products_with_history}, с просмотрами: {len(views_stats)}")
+                
+                if len(views_stats) == 0 and products_with_history > 0:
+                    # Логируем пример данных для отладки
+                    if products_data:
+                        example_product = products_data[0]
+                        self.logger.debug(f"Пример структуры продукта: nmId={example_product.get('product', {}).get('nmId')}, "
+                                        f"история: {len(example_product.get('history', []))} записей")
+                        if example_product.get('history'):
+                            example_history = example_product.get('history')[0]
+                            self.logger.debug(f"Пример записи истории: {example_history}")
+                
                 return views_stats
                 
             except requests.exceptions.Timeout:
