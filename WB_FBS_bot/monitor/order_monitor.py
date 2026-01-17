@@ -267,9 +267,22 @@ class OrderMonitor:
                     self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
                     sys.stdout.flush()
                     
-                    # Получаем список vendorCode для лучшего отображения (опционально)
-                    # Пока оставляем как есть - API сам должен возвращать детализацию
-                    views_stats = self.analytics_client.get_product_views_for_date(yesterday_str)
+                    # Пробуем получить список товаров для детализации через nmIds
+                    nm_ids = None
+                    if self.content_client:
+                        try:
+                            self.logger.debug("Получение списка товаров для детализации...")
+                            cards = self.content_client.get_all_cards()
+                            nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
+                            self.logger.debug(f"Получено {len(nm_ids)} nmIds для фильтрации")
+                            # Ограничиваем до разумного количества (например, 100) чтобы не перегружать API
+                            if len(nm_ids) > 100:
+                                self.logger.warning(f"Слишком много товаров ({len(nm_ids)}), используем первые 100 для запроса")
+                                nm_ids = nm_ids[:100]
+                        except Exception as e:
+                            self.logger.warning(f"Не удалось получить список товаров для детализации: {e}")
+                    
+                    views_stats = self.analytics_client.get_product_views_for_date(yesterday_str, nm_ids=nm_ids)
                     
                     if views_stats:
                         self.logger.info(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")
