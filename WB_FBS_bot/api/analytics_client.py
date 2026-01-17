@@ -59,7 +59,7 @@ class WBAnalyticsClient:
         payload["groupBySa"] = True
         
         # Если указаны nmIds, добавляем их для фильтрации
-        if nm_ids:
+        if nm_ids and len(nm_ids) > 0:
             payload["nmIds"] = nm_ids
             self.logger.debug(f"Используется фильтрация по nmIds: {len(nm_ids)} товаров")
         
