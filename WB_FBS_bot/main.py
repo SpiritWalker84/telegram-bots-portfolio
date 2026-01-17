@@ -20,16 +20,28 @@ def setup_logging() -> None:
             super().emit(record)
             self.flush()
     
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[
-            FlushingStreamHandler(sys.stdout),
-            FlushingFileHandler('wb_fbs_bot.log', encoding='utf-8')
-        ],
-        force=True  # Перезаписываем существующую конфигурацию
-    )
+    # Консольный handler - INFO и выше (для отладки)
+    console_handler = FlushingStreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    
+    # Файловый handler - только WARNING и выше (чтобы не разрастался)
+    file_handler = FlushingFileHandler('wb_fbs_bot.log', encoding='utf-8')
+    file_handler.setLevel(logging.WARNING)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    
+    # Настройка root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)  # Минимальный уровень для root logger
+    root_logger.handlers.clear()  # Очищаем существующие handlers
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
     
     # Принудительный flush для stdout
     sys.stdout.flush()
