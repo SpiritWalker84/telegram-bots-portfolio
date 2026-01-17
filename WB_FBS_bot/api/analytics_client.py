@@ -255,47 +255,42 @@ class WBAnalyticsClient:
                 self.logger.debug(f"Полный ответ API (первые 500 символов): {str(data)[:500]}")
                 self.logger.debug(f"Получено записей в ответе: {len(data)}")
                 
-                # Если структура ответа: [{"nmId": 1522, "date": "2026-01-16", "shows": 22}]
+                # Структура ответа: [{"product": {...}, "history": [...]}]
+                # где history содержит записи с openCount за даты
                 views_stats = {}
                 
-                for item in data:
-                    nm_id = item.get("nmId")
-                    shows = item.get("shows", 0)  # Поле называется "shows", не "openCount"
-                    item_date = item.get("date")
+                for product_data in data:
+                    product = product_data.get("product", {})
+                    vendor_code = product.get("vendorCode", "").strip()
+                    nm_id = product.get("nmId")
+                    history = product_data.get("history", [])
                     
-                    if item_date != date:
+                    # Если нет vendorCode, используем nmId как идентификатор
+                    if not vendor_code and nm_id:
+                        vendor_code = f"nmId_{nm_id}"
+                    elif not vendor_code:
+                        self.logger.debug(f"Пропущен продукт без vendorCode и nmId")
                         continue
                     
-                    if shows > 0:
-                        # Пока используем nmId, потом можно заменить на vendorCode
-                        identifier = f"nmId_{nm_id}"
-                        views_stats[identifier] = shows
-                        self.logger.debug(f"nmId {nm_id}, дата {item_date}, shows: {shows}")
-                
-                # Если структура ответа: [{"product": {...}, "history": [...]}] (старый формат)
-                if not views_stats and data:
-                    for product_data in data:
-                        product = product_data.get("product", {})
-                        vendor_code = product.get("vendorCode", "").strip()
-                        nm_id = product.get("nmId")
-                        history = product_data.get("history", [])
-                        
-                        if not vendor_code and nm_id:
-                            vendor_code = f"nmId_{nm_id}"
-                        
-                        if not history:
-                            continue
-                        
-                        for day_data in history:
-                            day_date = day_data.get("date")
-                            if day_date == date:
-                                open_count = day_data.get("openCount", day_data.get("shows", 0))
-                                if open_count > 0:
-                                    if vendor_code in views_stats:
-                                        views_stats[vendor_code] += open_count
-                                    else:
-                                        views_stats[vendor_code] = open_count
-                                break
+                    if not history:
+                        self.logger.debug(f"Продукт {vendor_code} без истории")
+                        continue
+                    
+                    # Ищем данные за указанную дату в history
+                    for day_data in history:
+                        day_date = day_data.get("date")
+                        if day_date == date:
+                            # Используем openCount (может быть также shows в некоторых случаях)
+                            open_count = day_data.get("openCount", day_data.get("shows", 0))
+                            
+                            self.logger.debug(f"Продукт {vendor_code}, дата {day_date}, openCount: {open_count}")
+                            
+                            if open_count > 0:
+                                if vendor_code in views_stats:
+                                    views_stats[vendor_code] += open_count
+                                else:
+                                    views_stats[vendor_code] = open_count
+                            break
                 
                 self.logger.info(f"Обработано записей: {len(data)}, с просмотрами: {len(views_stats)}")
                 
