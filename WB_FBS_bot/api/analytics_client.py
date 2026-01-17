@@ -167,6 +167,117 @@ class WBAnalyticsClient:
         
         return {}
     
+    def get_product_views_detailed_for_date(self, date: str = None, nm_ids: Optional[List[int]] = None, max_retries: int = 3, retry_delay: int = 10) -> Dict[str, int]:
+        """
+        Получает детализированную статистику просмотров карточек товаров за указанную дату
+        Использует endpoint /products/history для получения данных с vendorCode
+        
+        Args:
+            date: Дата в формате YYYY-MM-DD (если None, используется сегодня)
+            nm_ids: Опциональный список nmId для фильтрации (если None или пустой, запрашивает все товары)
+            max_retries: Максимальное количество попыток
+            retry_delay: Задержка между попытками в секундах
+            
+        Returns:
+            Dict[str, int]: Словарь {vendorCode: openCount}, только с ненулевыми значениями
+        """
+        import time
+        
+        if date is None:
+            date = datetime.utcnow().strftime('%Y-%m-%d')
+        
+        # Формируем запрос для одного дня
+        payload = {
+            "selectedPeriod": {
+                "start": date,
+                "end": date
+            },
+            "skipDeletedNm": True,
+            "aggregationLevel": "day"
+        }
+        
+        # Если указаны nmIds, используем их. Иначе запрашиваем все (можно передать [0] или не передавать)
+        if nm_ids and len(nm_ids) > 0:
+            payload["nmIds"] = nm_ids
+            self.logger.debug(f"Используется фильтрация по nmIds: {len(nm_ids)} товаров")
+        else:
+            # Если не указаны nmIds, передаем [0] чтобы получить все товары
+            payload["nmIds"] = [0]
+            self.logger.debug("Запрашиваем все товары (nmIds: [0])")
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.logger.info(f"Запрос детализированной статистики просмотров за {date} (попытка {attempt}/{max_retries})")
+                response = self.session.post(self.base_url_products, json=payload, timeout=30)
+                response.raise_for_status()
+                
+                # Ответ - это массив объектов, а не объект с data
+                products_data = response.json()
+                
+                self.logger.debug(f"Полный ответ API (первые 500 символов): {str(products_data)[:500]}")
+                self.logger.debug(f"Получено продуктов в ответе: {len(products_data)}")
+                
+                # Собираем статистику просмотров
+                views_stats = {}
+                
+                for product_data in products_data:
+                    product = product_data.get("product", {})
+                    vendor_code = product.get("vendorCode", "").strip()
+                    nm_id = product.get("nmId")
+                    history = product_data.get("history", [])
+                    
+                    if not vendor_code:
+                        self.logger.debug(f"Пропущен продукт без vendorCode: nmId={nm_id}")
+                        continue
+                    
+                    if not history:
+                        self.logger.debug(f"Продукт {vendor_code} без истории")
+                        continue
+                    
+                    # Берем данные за указанную дату
+                    for day_data in history:
+                        day_date = day_data.get("date")
+                        if day_date == date:
+                            open_count = day_data.get("openCount", 0)
+                            
+                            self.logger.debug(f"Продукт {vendor_code}, дата {day_date}, openCount: {open_count}")
+                            
+                            if open_count > 0:
+                                # Если уже есть запись с таким vendorCode, суммируем
+                                if vendor_code in views_stats:
+                                    views_stats[vendor_code] += open_count
+                                else:
+                                    views_stats[vendor_code] = open_count
+                            break
+                
+                self.logger.info(f"Обработано продуктов: {len(products_data)}, с просмотрами: {len(views_stats)}")
+                
+                return views_stats
+                
+            except requests.exceptions.Timeout:
+                self.logger.warning(f"Таймаут при запросе к Analytics API (попытка {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except requests.exceptions.ConnectionError as e:
+                self.logger.warning(f"Ошибка соединения с Analytics API (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Ошибка при запросе к Analytics API (попытка {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+                else:
+                    raise
+            except Exception as e:
+                self.logger.error(f"Неожиданная ошибка при обработке ответа Analytics API: {e}")
+                raise
+        
+        return {}
+    
     def test_connection(self) -> bool:
         """
         Проверяет соединение с Analytics API
