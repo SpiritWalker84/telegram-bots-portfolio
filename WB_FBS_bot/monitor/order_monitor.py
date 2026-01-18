@@ -34,7 +34,12 @@ class OrderMonitor:
         
         # Инициализация Analytics API и Content API (если указан ключ)
         analytics_api_key = config.wb_analytics_api_key or config.wb_api_key
-        self.analytics_client = WBAnalyticsClient(analytics_api_key) if analytics_api_key else None
+        if analytics_api_key:
+            self.analytics_client = WBAnalyticsClient(analytics_api_key)
+            self.logger.info("Analytics API клиент инициализирован")
+        else:
+            self.analytics_client = None
+            self.logger.warning("Analytics API ключ не найден. Отчет о просмотрах карточек не будет доступен.")
         
         # Content API для получения списка товаров (используется для лучшего отображения)
         from api.content_client import WBContentClient
@@ -118,12 +123,15 @@ class OrderMonitor:
                     total_slept = 0
                     last_report_check = 0  # Время последней проверки отчета (в секундах)
                     
+                    # Первая проверка времени сразу
+                    self._check_and_send_daily_report()
+                    
                     while total_slept < self.config.wb_poll_interval and self.is_running:
                         time.sleep(sleep_interval)
                         total_slept += sleep_interval
                         
                         # Проверяем ежедневный отчет каждую минуту (60 секунд)
-                        # чтобы не пропустить момент 00:00
+                        # чтобы не пропустить момент 00:00 или 05:00
                         if total_slept - last_report_check >= 60:
                             self._check_and_send_daily_report()
                             last_report_check = total_slept
@@ -219,9 +227,13 @@ class OrderMonitor:
             sys.stderr.flush()
     
     def _check_and_send_daily_report(self) -> None:
-        """Проверяет время и отправляет ежедневные отчеты в 00:00 и 00:05"""
+        """Проверяет время и отправляет ежедневные отчеты в 00:00 и 05:00"""
         now = datetime.utcnow()
         current_date = now.date()
+        
+        # Логируем проверку времени, если мы в окнах отчетов (для отладки)
+        if (now.hour == 0 and now.minute <= 5) or (now.hour == 5 and now.minute <= 5):
+            self.logger.debug(f"Проверка времени отчета: {now.hour:02d}:{now.minute:02d} UTC, дата: {current_date}")
         
         # Отчет о заказах в 00:00-00:05
         if now.hour == 0 and now.minute <= 5:
@@ -247,7 +259,8 @@ class OrderMonitor:
         
         # Отчет о просмотрах карточек в 05:00-05:05
         if now.hour == 5 and now.minute <= 5:
-            self.logger.debug(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d}, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+            self.logger.info(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d}, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+            sys.stdout.flush()
             
             # Проверяем, что analytics_client инициализирован
             if not self.analytics_client:
@@ -258,7 +271,8 @@ class OrderMonitor:
             
             # Отправляем отчет только один раз за день
             if self.last_views_report_date != current_date:
-                self.logger.debug(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+                self.logger.info(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+                sys.stdout.flush()
                 # Получаем статистику просмотров за вчерашний день
                 yesterday = current_date - timedelta(days=1)
                 yesterday_str = yesterday.strftime('%Y-%m-%d')
@@ -353,13 +367,30 @@ class OrderMonitor:
                     
                     # Обновляем дату последнего отчета (вне зависимости от наличия просмотров)
                     self.last_views_report_date = current_date
+                    self.logger.info(f"Дата последнего отчета о просмотрах обновлена: {self.last_views_report_date}")
                 except Exception as e:
                     self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
                     sys.stderr.flush()
+                    # Не обновляем last_views_report_date при ошибке, чтобы повторить попытку
+                    # Но только если это первая попытка сегодня
+                    if self.last_views_report_date != current_date:
+                        # Устанавливаем временную метку, чтобы не повторять слишком часто
+                        # Но это позволит повторить попытку при следующей проверке (если еще в окне 05:00-05:05)
+                        pass
         else:
             # Сбрасываем дату отчета, если уже не время отчета (после 00:05 для заказов, после 05:05 для просмотров)
-            if (now.hour != 0 or now.minute > 5) and (now.hour != 5 or now.minute > 5):
+            # Но только если мы уверены, что отчет не должен был быть отправлен (вне окна времени)
+            if now.hour == 0 and now.minute > 5:
+                # Вне окна 00:00-00:05 для заказов
+                if self.last_daily_report_date == current_date:
+                    self.last_daily_report_date = None
+            elif now.hour == 5 and now.minute > 5:
+                # Вне окна 05:00-05:05 для просмотров
+                if self.last_views_report_date == current_date:
+                    self.last_views_report_date = None
+            elif now.hour > 5 or (now.hour < 5 and now.hour > 0) or now.hour == 0 and now.minute > 5:
+                # Полностью вне окон отчетов - сбрасываем обе даты
                 if self.last_daily_report_date == current_date:
                     self.last_daily_report_date = None
                 if self.last_views_report_date == current_date:
