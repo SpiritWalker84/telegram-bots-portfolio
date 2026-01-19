@@ -59,10 +59,19 @@ class WBContentClient:
                     
                     # Обработка rate limiting
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get('Retry-After', 10))
+                        retry_after = int(response.headers.get('Retry-After', 30))  # Увеличено с 10 до 30
                         self.logger.warning(f"Rate limit (429), ждем {retry_after} секунд...")
                         time.sleep(retry_after)
                         continue  # Повторяем попытку
+                    
+                    # Обработка ошибки 500
+                    if response.status_code == 500:
+                        self.logger.error(f"Ошибка сервера (500) при запросе карточек (попытка {attempt}/{max_retries})")
+                        if attempt < max_retries:
+                            time.sleep(retry_delay * 2)  # Увеличиваем задержку при 500
+                            continue
+                        else:
+                            raise requests.exceptions.RequestException(f"Сервер вернул ошибку 500 после {max_retries} попыток")
                     
                     response.raise_for_status()
                     
@@ -89,6 +98,11 @@ class WBContentClient:
                         "nmID": cursor_info.get("nmID"),
                         "limit": 100
                     }
+                    
+                    # Задержка между запросами для избежания rate limiting
+                    # Добавляем задержку между страницами (увеличено для снижения нагрузки)
+                    if len(all_cards) > 0:
+                        time.sleep(2)  # Увеличено с 1 до 2 секунд между страницами
                     
                     break  # Успешно получили данные, выходим из retry цикла
                     

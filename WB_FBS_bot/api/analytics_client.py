@@ -218,14 +218,16 @@ class WBAnalyticsClient:
                 
                 # Обработка rate limiting (429)
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get('Retry-After', 30))
+                    retry_after = int(response.headers.get('Retry-After', 60))  # Увеличено с 30 до 60
                     self.logger.warning(f"Rate limit (429), ждем {retry_after} секунд...")
                     time.sleep(retry_after)
                     # Продолжаем цикл попыток
                     if attempt < max_retries:
                         continue
                     else:
-                        raise requests.exceptions.RequestException("Превышен лимит запросов после нескольких попыток")
+                        # Если после всех попыток все еще 429, возвращаем пустой результат
+                        self.logger.error("Превышен лимит запросов после нескольких попыток. Возвращаем пустой результат.")
+                        return {}
                 
                 # Логируем ошибки для отладки
                 if response.status_code != 200:

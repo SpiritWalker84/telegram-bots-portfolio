@@ -259,7 +259,7 @@ class OrderMonitor:
         
         # Отчет о просмотрах карточек в 05:00-05:05
         if now.hour == 5 and now.minute <= 5:
-            self.logger.info(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d}, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+            self.logger.warning(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d}, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
             sys.stdout.flush()
             
             # Проверяем, что analytics_client инициализирован
@@ -271,107 +271,134 @@ class OrderMonitor:
             
             # Отправляем отчет только один раз за день
             if self.last_views_report_date != current_date:
-                self.logger.info(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+                self.logger.warning(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
                 sys.stdout.flush()
                 # Получаем статистику просмотров за вчерашний день
                 yesterday = current_date - timedelta(days=1)
                 yesterday_str = yesterday.strftime('%Y-%m-%d')
                 
                 try:
-                    self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
+                    self.logger.warning(f"Получение статистики просмотров за {yesterday_str}")
                     sys.stdout.flush()
                     
                     # Получаем список товаров для запроса (API требует nmIds, до 20 за раз)
                     nm_ids = None
+                    nm_to_vendor = {}
+                    content_api_failed = False
+                    
                     if self.content_client:
                         try:
-                            self.logger.debug("Получение списка товаров для запроса статистики...")
+                            self.logger.warning("Получение списка товаров для запроса статистики...")
                             cards = self.content_client.get_all_cards()
                             nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
-                            self.logger.debug(f"Получено {len(nm_ids)} nmIds")
+                            self.logger.warning(f"Получено {len(nm_ids)} nmIds")
                             
                             # Создаем маппинг nmId -> vendorCode для замены в отчете
                             nm_to_vendor = {card.get("nmID"): card.get("vendorCode", "").strip() 
                                           for card in cards if card.get("nmID") and card.get("vendorCode")}
+                        except Exception as e:
+                            self.logger.error(f"Не удалось получить список товаров через Content API: {e}")
+                            content_api_failed = True
+                            # Пробуем использовать кеш или пропускаем отчет
+                            if not nm_ids:
+                                self.logger.error("Невозможно получить отчет без списка товаров. Отправляем уведомление об ошибке.")
+                                self.telegram_bot.send_message(f"⚠️ Ошибка при получении отчета о просмотрах за {yesterday_str}: не удалось получить список товаров через Content API. Ошибка: {str(e)[:200]}")
+                                # Помечаем как обработанное, чтобы не спамить
+                                self.last_views_report_date = current_date
+                                return
+                    else:
+                        self.logger.error("Content API клиент не инициализирован, невозможно получить список товаров")
+                        self.telegram_bot.send_message(f"⚠️ Ошибка: Content API клиент не инициализирован. Отчет о просмотрах за {yesterday_str} не может быть получен.")
+                        self.last_views_report_date = current_date
+                        return
+                    
+                    if not nm_ids or len(nm_ids) == 0:
+                        self.logger.warning(f"Список товаров пуст, отчет не может быть сформирован")
+                        self.last_views_report_date = current_date
+                        return
+                    
+                    # Если товаров больше 20, делаем несколько запросов батчами
+                    batch_size = 20
+                    total_batches = (len(nm_ids) + batch_size - 1) // batch_size
+                    
+                    if len(nm_ids) > batch_size:
+                        self.logger.warning(f"Товаров: {len(nm_ids)}, делаем запросы батчами по {batch_size} (всего {total_batches} батчей)")
+                        all_views_stats = {}
+                        
+                        for i in range(0, len(nm_ids), batch_size):
+                            batch_nm_ids = nm_ids[i:i+batch_size]
+                            batch_num = (i // batch_size) + 1
                             
-                            # Если товаров больше 20, делаем несколько запросов батчами
-                            batch_size = 20
-                            total_batches = (len(nm_ids) + batch_size - 1) // batch_size
+                            # Увеличиваем задержку между батчами для избежания rate limiting
+                            if i >= batch_size:
+                                delay = 10  # Увеличено с 5 до 10 секунд
+                                self.logger.warning(f"Задержка {delay} секунд перед батчем {batch_num}...")
+                                time.sleep(delay)
                             
-                            if len(nm_ids) > batch_size:
-                                self.logger.info(f"Товаров: {len(nm_ids)}, делаем запросы батчами по {batch_size} (всего {total_batches} батчей)")
-                                all_views_stats = {}
+                            try:
+                                self.logger.warning(f"Запрос батча {batch_num}/{total_batches} ({len(batch_nm_ids)} товаров)...")
+                                batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
                                 
-                                for i in range(0, len(nm_ids), batch_size):
-                                    batch_nm_ids = nm_ids[i:i+batch_size]
-                                    batch_num = (i // batch_size) + 1
-                                    
-                                    # Задержка между батчами для избежания rate limiting
-                                    if i >= batch_size:
-                                        delay = 5
-                                        self.logger.debug(f"Задержка {delay} секунд перед батчем {batch_num}...")
-                                        time.sleep(delay)
-                                    
-                                    self.logger.debug(f"Запрос батча {batch_num}/{total_batches} ({len(batch_nm_ids)} товаров)...")
-                                    batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
-                                    
-                                    # Объединяем результаты батча
-                                    for key, value in batch_stats.items():
-                                        if key.startswith("nmId_"):
-                                            nm_id = int(key.replace("nmId_", ""))
-                                            vendor_code = nm_to_vendor.get(nm_id)
-                                            if vendor_code:
-                                                all_views_stats[vendor_code] = all_views_stats.get(vendor_code, 0) + value
-                                            else:
-                                                all_views_stats[key] = all_views_stats.get(key, 0) + value
-                                        else:
-                                            all_views_stats[key] = all_views_stats.get(key, 0) + value
-                                    
-                                    # Логируем прогресс
-                                    total_views_found = sum(all_views_stats.values())
-                                    batch_views = sum(batch_stats.values())
-                                    if batch_views > 0:
-                                        self.logger.debug(f"В батче {batch_num} найдено: {batch_views} просмотров (всего: {total_views_found})")
-                                
-                                views_stats = all_views_stats
-                            else:
-                                views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=nm_ids)
-                                
-                                # Заменяем nmId_* на vendorCode
-                                final_stats = {}
-                                for key, value in views_stats.items():
+                                # Объединяем результаты батча
+                                for key, value in batch_stats.items():
                                     if key.startswith("nmId_"):
                                         nm_id = int(key.replace("nmId_", ""))
-                                        vendor_code = nm_to_vendor.get(nm_id, key)
-                                        final_stats[vendor_code] = value
+                                        vendor_code = nm_to_vendor.get(nm_id)
+                                        if vendor_code:
+                                            all_views_stats[vendor_code] = all_views_stats.get(vendor_code, 0) + value
+                                        else:
+                                            all_views_stats[key] = all_views_stats.get(key, 0) + value
                                     else:
-                                        final_stats[key] = value
-                                views_stats = final_stats
-                        except Exception as e:
-                            self.logger.warning(f"Не удалось получить список товаров: {e}")
-                            views_stats = {}
+                                        all_views_stats[key] = all_views_stats.get(key, 0) + value
+                                
+                                # Логируем прогресс
+                                total_views_found = sum(all_views_stats.values())
+                                batch_views = sum(batch_stats.values())
+                                if batch_views > 0:
+                                    self.logger.warning(f"В батче {batch_num} найдено: {batch_views} просмотров (всего: {total_views_found})")
+                            except Exception as batch_error:
+                                self.logger.error(f"Ошибка при обработке батча {batch_num}: {batch_error}")
+                                # Продолжаем со следующим батчем
+                                continue
+                        
+                        views_stats = all_views_stats
                     else:
-                        self.logger.warning("Content API клиент не инициализирован, невозможно получить список товаров")
-                        views_stats = {}
+                        views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=nm_ids)
+                        
+                        # Заменяем nmId_* на vendorCode
+                        final_stats = {}
+                        for key, value in views_stats.items():
+                            if key.startswith("nmId_"):
+                                nm_id = int(key.replace("nmId_", ""))
+                                vendor_code = nm_to_vendor.get(nm_id, key)
+                                final_stats[vendor_code] = value
+                            else:
+                                final_stats[key] = value
+                        views_stats = final_stats
                     
                     if views_stats:
-                        self.logger.info(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")
+                        self.logger.warning(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")
                         sys.stdout.flush()
                         if self.telegram_bot.send_product_views_report(views_stats, yesterday_str):
-                            self.logger.info("Отчет о просмотрах успешно отправлен")
+                            self.logger.warning("Отчет о просмотрах успешно отправлен")
                         else:
-                            self.logger.warning("Не удалось отправить отчет о просмотрах")
+                            self.logger.error("Не удалось отправить отчет о просмотрах")
                     else:
-                        self.logger.info(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
+                        self.logger.warning(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
                     sys.stdout.flush()
                     
                     # Обновляем дату последнего отчета (вне зависимости от наличия просмотров)
                     self.last_views_report_date = current_date
-                    self.logger.info(f"Дата последнего отчета о просмотрах обновлена: {self.last_views_report_date}")
+                    self.logger.warning(f"Дата последнего отчета о просмотрах обновлена: {self.last_views_report_date}")
                 except Exception as e:
                     self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
                     sys.stderr.flush()
+                    # Отправляем уведомление об ошибке
+                    try:
+                        self.telegram_bot.send_message(f"❌ Ошибка при получении отчета о просмотрах за {yesterday_str}: {str(e)[:300]}")
+                    except:
+                        pass
                     # Не обновляем last_views_report_date при ошибке, чтобы повторить попытку
                     # Но только если это первая попытка сегодня
                     if self.last_views_report_date != current_date:
