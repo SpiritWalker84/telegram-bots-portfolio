@@ -240,6 +240,9 @@ class OrderMonitor:
             self.logger.debug(f"Проверка времени для отчета о заказах: {now.hour}:{now.minute:02d}")
             # Отправляем отчет только один раз за день
             if self.last_daily_report_date != current_date:
+                # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
+                self.last_daily_report_date = current_date
+                
                 # Получаем статистику за вчерашний день
                 yesterday = current_date - timedelta(days=1)
                 yesterday_str = yesterday.strftime('%Y-%m-%d')
@@ -253,9 +256,6 @@ class OrderMonitor:
                 else:
                     self.logger.warning("Не удалось отправить ежедневную статистику")
                 sys.stdout.flush()
-                
-                # Обновляем дату последнего отчета
-                self.last_daily_report_date = current_date
         
         # Отчет о просмотрах карточек в 05:00-05:05
         if now.hour == 5 and now.minute <= 5:
@@ -265,12 +265,16 @@ class OrderMonitor:
             # Проверяем, что analytics_client инициализирован
             if not self.analytics_client:
                 if self.last_views_report_date != current_date:
+                    # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
+                    self.last_views_report_date = current_date
                     self.logger.warning("Analytics API клиент не инициализирован. Отчет о просмотрах не будет отправлен.")
-                    self.last_views_report_date = current_date  # Помечаем как обработанное, чтобы не спамить
                 return
             
             # Отправляем отчет только один раз за день
             if self.last_views_report_date != current_date:
+                # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
+                self.last_views_report_date = current_date
+                
                 self.logger.warning(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
                 sys.stdout.flush()
                 # Получаем статистику просмотров за вчерашний день
@@ -303,18 +307,17 @@ class OrderMonitor:
                             if not nm_ids:
                                 self.logger.error("Невозможно получить отчет без списка товаров. Отправляем уведомление об ошибке.")
                                 self.telegram_bot.send_message(f"⚠️ Ошибка при получении отчета о просмотрах за {yesterday_str}: не удалось получить список товаров через Content API. Ошибка: {str(e)[:200]}")
-                                # Помечаем как обработанное, чтобы не спамить
-                                self.last_views_report_date = current_date
+                                # Дата уже обновлена в начале блока
                                 return
                     else:
                         self.logger.error("Content API клиент не инициализирован, невозможно получить список товаров")
                         self.telegram_bot.send_message(f"⚠️ Ошибка: Content API клиент не инициализирован. Отчет о просмотрах за {yesterday_str} не может быть получен.")
-                        self.last_views_report_date = current_date
+                        # Дата уже обновлена в начале блока
                         return
                     
                     if not nm_ids or len(nm_ids) == 0:
                         self.logger.warning(f"Список товаров пуст, отчет не может быть сформирован")
-                        self.last_views_report_date = current_date
+                        # Дата уже обновлена в начале блока
                         return
                     
                     # Если товаров больше 20, делаем несколько запросов батчами
@@ -387,9 +390,8 @@ class OrderMonitor:
                         self.logger.warning(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
                     sys.stdout.flush()
                     
-                    # Обновляем дату последнего отчета (вне зависимости от наличия просмотров)
-                    self.last_views_report_date = current_date
-                    self.logger.warning(f"Дата последнего отчета о просмотрах обновлена: {self.last_views_report_date}")
+                    # Дата уже обновлена в начале блока, здесь только логируем
+                    self.logger.warning(f"Дата последнего отчета о просмотрах: {self.last_views_report_date}")
                 except Exception as e:
                     self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
@@ -399,29 +401,11 @@ class OrderMonitor:
                         self.telegram_bot.send_message(f"❌ Ошибка при получении отчета о просмотрах за {yesterday_str}: {str(e)[:300]}")
                     except:
                         pass
-                    # Не обновляем last_views_report_date при ошибке, чтобы повторить попытку
-                    # Но только если это первая попытка сегодня
-                    if self.last_views_report_date != current_date:
-                        # Устанавливаем временную метку, чтобы не повторять слишком часто
-                        # Но это позволит повторить попытку при следующей проверке (если еще в окне 05:00-05:05)
-                        pass
-        else:
-            # Сбрасываем дату отчета, если уже не время отчета (после 00:05 для заказов, после 05:05 для просмотров)
-            # Но только если мы уверены, что отчет не должен был быть отправлен (вне окна времени)
-            if now.hour == 0 and now.minute > 5:
-                # Вне окна 00:00-00:05 для заказов
-                if self.last_daily_report_date == current_date:
-                    self.last_daily_report_date = None
-            elif now.hour == 5 and now.minute > 5:
-                # Вне окна 05:00-05:05 для просмотров
-                if self.last_views_report_date == current_date:
-                    self.last_views_report_date = None
-            elif now.hour > 5 or (now.hour < 5 and now.hour > 0) or now.hour == 0 and now.minute > 5:
-                # Полностью вне окон отчетов - сбрасываем обе даты
-                if self.last_daily_report_date == current_date:
-                    self.last_daily_report_date = None
-                if self.last_views_report_date == current_date:
-                    self.last_views_report_date = None
+                    # Сбрасываем дату при ошибке, чтобы повторить попытку при следующей проверке (если еще в окне 05:00-05:05)
+                    # Но только если мы еще в окне времени, иначе дата останется обновленной
+                    if now.hour == 5 and now.minute <= 5:
+                        self.last_views_report_date = None
+                        self.logger.warning("Ошибка при отправке отчета. Дата сброшена для повторной попытки.")
     
     def get_statistics(self) -> dict:
         """

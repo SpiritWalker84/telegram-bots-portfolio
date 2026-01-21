@@ -1,0 +1,2 @@
+"""Booking bot package (refactored)."""
+

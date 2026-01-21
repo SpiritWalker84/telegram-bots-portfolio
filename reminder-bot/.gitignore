@@ -1,6 +1,8 @@
 # Environment variables
 .env
 .env.local
+# Но .env.example должен быть в репозитории
+!.env.example
 
 # Database
 tasks.db

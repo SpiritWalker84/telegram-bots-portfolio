@@ -8,35 +8,18 @@ from typing import Any, Awaitable, Callable, Dict
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from database import Database
-from handlers import router
-
-
-class Settings(BaseSettings):
-    """Bot settings from environment variables."""
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        env_ignore_empty=True,
-    )
-
-    BOT_TOKEN: str
-    PROVIDER_TOKEN: str
-    COURSE_PRICE: int = 990
-    CHANNEL_ID: str
-    DB_PATH: str = "bot.db"
-
+from src.config import Config
+from src.database.models import Database
+from src.services.payment_service import PaymentService
+from src.services.user_service import UserService
+from src.bot.handlers import router
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("bot.log", encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -45,23 +28,42 @@ logger = logging.getLogger(__name__)
 
 async def main() -> None:
     """Main bot function."""
-    # Load settings
-    try:
-        settings = Settings()
-    except Exception as e:
-        logger.error(f"Error loading settings: {e}")
+    # Load configuration
+    config = Config.load()
+    
+    # Validate configuration
+    if not config.validate():
+        logger.error("Configuration validation failed. Exiting.")
         sys.exit(1)
-
+    
+    # Configure logging with file handler if specified
+    if config.LOG_FILE:
+        file_handler = logging.FileHandler(config.LOG_FILE, encoding="utf-8")
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        logging.getLogger().addHandler(file_handler)
+    
+    # Set log level
+    logging.getLogger().setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
+    
     # Initialize bot and dispatcher
     bot = Bot(
-        token=settings.BOT_TOKEN,
+        token=config.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
 
     # Initialize database
-    db = Database(settings.DB_PATH)
+    db = Database(config.DB_PATH)
     await db.create_table()
+
+    # Initialize services
+    payment_service = PaymentService(
+        provider_token=config.PROVIDER_TOKEN,
+        course_price=config.COURSE_PRICE
+    )
+    user_service = UserService(db=db)
 
     # Register router
     dp.include_router(router)
@@ -75,9 +77,10 @@ async def main() -> None:
             data: Dict[str, Any],
         ) -> Any:
             data["db"] = db
-            data["provider_token"] = settings.PROVIDER_TOKEN
-            data["course_price"] = settings.COURSE_PRICE
-            data["channel_id"] = settings.CHANNEL_ID
+            data["payment_service"] = payment_service
+            data["user_service"] = user_service
+            data["channel_id"] = config.CHANNEL_ID
+            data["course_price"] = config.COURSE_PRICE
             return await handler(event, data)
 
     dp.message.middleware(DependencyMiddleware())
@@ -114,4 +117,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
-

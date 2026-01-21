@@ -3,7 +3,7 @@ CRUD операции с базой данных
 """
 import aiosqlite
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
@@ -297,13 +297,11 @@ class Database:
                     for row in rows
                 ]
     
-    async def get_available_times(self, date: str, service_id: int) -> List[str]:
+    async def get_available_times(self, date: str, service_id: int, config) -> List[str]:
         """Получить доступные времена для записи"""
-        from config import APPOINTMENT_INTERVAL
-        from datetime import datetime
-        
         # Получаем время работы из настроек или используем значения по умолчанию
-        WORKING_HOURS_START, WORKING_HOURS_END = await self.get_working_hours()
+        WORKING_HOURS_START, WORKING_HOURS_END = await self.get_working_hours(config)
+        APPOINTMENT_INTERVAL = config.APPOINTMENT_INTERVAL
         
         # Получаем длительность услуги
         service = await self.get_service(service_id)
@@ -376,16 +374,13 @@ class Database:
         
         return available
     
-    async def get_all_times_with_availability(self, date: str, service_id: int) -> List[dict]:
+    async def get_all_times_with_availability(self, date: str, service_id: int, config) -> List[dict]:
         """Получить все времена с информацией о доступности"""
-        from config import APPOINTMENT_INTERVAL
-        from datetime import datetime
-        
         # Получаем время работы из настроек или используем значения по умолчанию
-        WORKING_HOURS_START, WORKING_HOURS_END = await self.get_working_hours()
+        WORKING_HOURS_START, WORKING_HOURS_END = await self.get_working_hours(config)
         
         # Получаем интервал из настроек
-        interval = int(await self.get_setting("appointment_interval", str(APPOINTMENT_INTERVAL)))
+        interval = int(await self.get_setting("appointment_interval", str(config.APPOINTMENT_INTERVAL)))
         
         # Получаем длительность услуги
         service = await self.get_service(service_id)
@@ -506,6 +501,54 @@ class Database:
         """Подтвердить запись"""
         return await self.update_appointment_status(appointment_id, "confirmed")
     
+    async def get_appointments_for_reminder(self, minutes_before: int = 30) -> List[Dict[str, Any]]:
+        """Получить записи, для которых нужно отправить напоминание"""
+        now = datetime.now()
+        reminder_time = now + timedelta(minutes=minutes_before)
+        
+        target_date = reminder_time.strftime("%Y-%m-%d")
+        target_time = reminder_time.strftime("%H:%M")
+        
+        async with self.get_connection() as conn:
+            async with conn.execute("""
+                SELECT a.id, a.client_id, a.client_name, a.client_username,
+                       a.service_id, s.name as service_name, a.date, a.time,
+                       a.status, a.notes
+                FROM appointments a
+                LEFT JOIN services s ON a.service_id = s.id
+                WHERE a.date = ? 
+                  AND a.time = ?
+                  AND a.status = 'confirmed'
+                  AND a.reminder_sent = 0
+            """, (target_date, target_time)) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    {
+                        "id": row[0],
+                        "client_id": row[1],
+                        "client_name": row[2],
+                        "client_username": row[3],
+                        "service_id": row[4],
+                        "service_name": row[5],
+                        "date": row[6],
+                        "time": row[7],
+                        "status": row[8],
+                        "notes": row[9]
+                    }
+                    for row in rows
+                ]
+    
+    async def mark_reminder_sent(self, appointment_id: int) -> bool:
+        """Отметить, что напоминание отправлено"""
+        async with self.get_connection() as conn:
+            cursor = await conn.execute("""
+                UPDATE appointments 
+                SET reminder_sent = 1
+                WHERE id = ?
+            """, (appointment_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+    
     # ========== CRUD для администраторов ==========
     
     async def add_admin(self, user_id: int, username: Optional[str] = None,
@@ -571,10 +614,8 @@ class Database:
                 logger.error(f"Ошибка при сохранении настройки: {e}")
                 return False
     
-    async def get_working_hours(self) -> tuple[int, int]:
+    async def get_working_hours(self, config) -> tuple[int, int]:
         """Получить время работы (начало, конец)"""
-        import config
         start = await self.get_setting("working_hours_start", str(config.WORKING_HOURS_START))
         end = await self.get_setting("working_hours_end", str(config.WORKING_HOURS_END))
         return (int(start), int(end))
-
