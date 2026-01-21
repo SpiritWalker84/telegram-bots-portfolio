@@ -289,7 +289,6 @@ pdf-checkmaker-bot/
 │   └── test_files/            # Тестовые файлы
 ├── bot.py                     # Точка входа, инициализация бота/DP
 ├── requirements.txt
-├── pyproject.toml
 ├── README.md
 ├── .gitignore
 └── .env.example               # Пример файла с переменными окружения
