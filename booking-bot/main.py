@@ -97,17 +97,17 @@ async def main():
                 # Игнорируем ошибки "query is too old" при остановке бота
                 if "query is too old" in error_msg or "query id is invalid" in error_msg:
                     logger.debug(f"Ignoring old callback query during shutdown: {e}")
-                    return
+        return
                 # Игнорируем ошибку "message is not modified" - это нормально, если сообщение уже имеет нужное содержимое
                 if "message is not modified" in error_msg:
                     logger.debug(f"Ignoring 'message is not modified' error: {e}")
-                    return
+        return
                 raise
-            except Exception as e:
+    except Exception as e:
                 # Если бот останавливается, игнорируем ошибки
                 if _shutdown_flag:
                     logger.debug(f"Ignoring error during shutdown: {e}")
-                    return
+        return
                 raise
     
     dp.message.middleware(DependencyMiddleware())
@@ -139,36 +139,40 @@ async def main():
         
         logger.info("Остановка бота...")
         
-        # Отменяем фоновую задачу проверки напоминаний
+        # Отменяем фоновую задачу проверки напоминаний с таймаутом
         if reminder_task and not reminder_task.done():
             logger.info("Отмена задачи проверки напоминаний...")
             reminder_task.cancel()
             try:
-                await reminder_task
+                # Ждем отмену с таймаутом 2 секунды
+                await asyncio.wait_for(reminder_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.warning("Таймаут при отмене задачи проверки напоминаний")
             except asyncio.CancelledError:
                 logger.info("Задача проверки напоминаний отменена")
-            except Exception as e:
+    except Exception as e:
                 logger.warning(f"Ошибка при отмене задачи проверки напоминаний: {e}")
         
-        # Остановка polling (это остановит обработку новых обновлений)
+        # Остановка polling с таймаутом
         try:
-            await dp.stop_polling()
+            await asyncio.wait_for(dp.stop_polling(), timeout=3.0)
             logger.info("Polling остановлен")
+        except asyncio.TimeoutError:
+            logger.warning("Таймаут при остановке polling")
         except Exception as e:
             logger.warning(f"Ошибка при остановке polling: {e}")
-        
-        # Даем время на завершение обработки текущих обновлений
-        await asyncio.sleep(1)
-        
-        # Закрытие сессии бота
-        try:
-            await bot.session.close()
+    
+        # Закрытие сессии бота с таймаутом
+            try:
+            await asyncio.wait_for(bot.session.close(), timeout=2.0)
             logger.info("Сессия бота закрыта")
-        except Exception as e:
+        except asyncio.TimeoutError:
+            logger.warning("Таймаут при закрытии сессии бота")
+            except Exception as e:
             logger.warning(f"Ошибка при закрытии сессии бота: {e}")
         
-        logger.info("Бот остановлен")
-    
+    logger.info("Бот остановлен")
+
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     
@@ -201,7 +205,13 @@ async def main():
     finally:
         if not _shutdown_flag:
             _shutdown_flag = True
-        await on_shutdown()
+        # Выполняем shutdown с общим таймаутом
+        try:
+            await asyncio.wait_for(on_shutdown(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Таймаут при выполнении shutdown, принудительное завершение")
+        except Exception as e:
+            logger.error(f"Ошибка при shutdown: {e}", exc_info=True)
 
 
 if __name__ == "__main__":
