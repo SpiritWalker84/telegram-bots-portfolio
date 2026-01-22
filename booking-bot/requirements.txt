@@ -2,8 +2,10 @@ aiogram>=3.13.0
 aiosqlite>=0.20.0
 python-dotenv>=1.0.0
 python-dateutil>=2.9.0
+pydantic>=2.9.2
+pydantic-settings>=2.5.2
 
 # Примечание: для Python 3.14+ все зависимости уже установлены
 # Если возникают проблемы с компиляцией, используйте:
-# py -m pip install aiogram aiosqlite python-dotenv python-dateutil --only-binary :all:
+# py -m pip install aiogram aiosqlite python-dotenv python-dateutil pydantic pydantic-settings --only-binary :all:
 
