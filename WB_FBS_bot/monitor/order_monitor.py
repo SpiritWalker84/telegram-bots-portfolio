@@ -295,16 +295,16 @@ class OrderMonitor:
                 try:
                     # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
                     self.last_views_report_date = current_date
-                
-                self.logger.warning(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
-                sys.stdout.flush()
-                # Получаем статистику просмотров за вчерашний день
-                yesterday = current_date - timedelta(days=1)
-                yesterday_str = yesterday.strftime('%Y-%m-%d')
-                
-                try:
-                    self.logger.warning(f"Получение статистики просмотров за {yesterday_str}")
+                    
+                    self.logger.info(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
                     sys.stdout.flush()
+                    # Получаем статистику просмотров за вчерашний день
+                    yesterday = current_date - timedelta(days=1)
+                    yesterday_str = yesterday.strftime('%Y-%m-%d')
+                    
+                    try:
+                        self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
+                        sys.stdout.flush()
                     
                     # Получаем список товаров для запроса (API требует nmIds, до 20 за раз)
                     nm_ids = None
@@ -328,18 +328,18 @@ class OrderMonitor:
                             if not nm_ids:
                                 self.logger.error("Невозможно получить отчет без списка товаров. Отправляем уведомление об ошибке.")
                                 self.telegram_bot.send_message(f"⚠️ Ошибка при получении отчета о просмотрах за {yesterday_str}: не удалось получить список товаров через Content API. Ошибка: {str(e)[:200]}")
-                                # Дата уже обновлена в начале блока
-                                return
+                                # Выходим из внутреннего try, но дата уже обновлена
+                                raise  # Пробрасываем ошибку наверх
                     else:
                         self.logger.error("Content API клиент не инициализирован, невозможно получить список товаров")
                         self.telegram_bot.send_message(f"⚠️ Ошибка: Content API клиент не инициализирован. Отчет о просмотрах за {yesterday_str} не может быть получен.")
-                        # Дата уже обновлена в начале блока
-                        return
+                        # Выходим из внутреннего try, но дата уже обновлена
+                        raise Exception("Content API клиент не инициализирован")
                     
                     if not nm_ids or len(nm_ids) == 0:
                         self.logger.warning(f"Список товаров пуст, отчет не может быть сформирован")
-                        # Дата уже обновлена в начале блока
-                        return
+                        # Выходим из внутреннего try, но дата уже обновлена
+                        raise Exception("Список товаров пуст")
                     
                     # Если товаров больше 20, делаем несколько запросов батчами
                     batch_size = 20
@@ -411,22 +411,30 @@ class OrderMonitor:
                         self.logger.warning(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
                     sys.stdout.flush()
                     
-                    # Дата уже обновлена в начале блока, здесь только логируем
-                    self.logger.debug(f"Дата последнего отчета о просмотрах: {self.last_views_report_date}")
+                        # Дата уже обновлена в начале блока, здесь только логируем
+                        self.logger.debug(f"Дата последнего отчета о просмотрах: {self.last_views_report_date}")
+                    except Exception as e:
+                        self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
+                        sys.stdout.flush()
+                        sys.stderr.flush()
+                        # Отправляем уведомление об ошибке
+                        try:
+                            self.telegram_bot.send_message(f"❌ Ошибка при получении отчета о просмотрах за {yesterday_str}: {str(e)[:300]}")
+                        except:
+                            pass
+                        # Сбрасываем дату при ошибке, чтобы повторить попытку при следующей проверке (если еще в окне 05:00-05:05)
+                        # Но только если мы еще в окне времени, иначе дата останется обновленной
+                        if now.hour == 5 and now.minute <= 5:
+                            self.last_views_report_date = None
+                            self.logger.warning("Ошибка при отправке отчета. Дата сброшена для повторной попытки.")
                 except Exception as e:
-                    self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
+                    # Обработка ошибок на верхнем уровне
+                    self.logger.error(f"Критическая ошибка при обработке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
                     sys.stderr.flush()
-                    # Отправляем уведомление об ошибке
-                    try:
-                        self.telegram_bot.send_message(f"❌ Ошибка при получении отчета о просмотрах за {yesterday_str}: {str(e)[:300]}")
-                    except:
-                        pass
-                    # Сбрасываем дату при ошибке, чтобы повторить попытку при следующей проверке (если еще в окне 05:00-05:05)
-                    # Но только если мы еще в окне времени, иначе дата останется обновленной
+                    # Сбрасываем дату только если еще в окне времени
                     if now.hour == 5 and now.minute <= 5:
                         self.last_views_report_date = None
-                        self.logger.warning("Ошибка при отправке отчета. Дата сброшена для повторной попытки.")
                 finally:
                     # Снимаем блокировку после отправки
                     self._report_sending_lock = False
