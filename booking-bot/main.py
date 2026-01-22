@@ -150,7 +150,7 @@ async def main():
                 logger.warning("Таймаут при отмене задачи проверки напоминаний")
             except asyncio.CancelledError:
                 logger.info("Задача проверки напоминаний отменена")
-    except Exception as e:
+            except Exception as e:
                 logger.warning(f"Ошибка при отмене задачи проверки напоминаний: {e}")
         
         # Остановка polling с таймаутом
