@@ -19,36 +19,6 @@ from src.bot.handlers import router
 _shutdown_flag = False
 
 
-async def start_polling_with_retry(bot: Bot, dp: Dispatcher, max_retries: int = None):
-    """
-    Запуск polling с автоматическим переподключением при сетевых ошибках.
-    
-    Args:
-        bot: Экземпляр бота
-        dp: Экземпляр диспетчера
-        max_retries: Максимальное количество попыток (None = бесконечно)
-    """
-    retry_count = 0
-    while not _shutdown_flag:
-        try:
-            logger.info("Запуск polling...")
-            await dp.start_polling(bot)
-            # Если polling завершился без ошибки, выходим
-            break
-        except KeyboardInterrupt:
-            logger.info("Получен сигнал остановки")
-            break
-        except Exception as e:
-            retry_count += 1
-            if max_retries and retry_count > max_retries:
-                logger.error(f"Достигнуто максимальное количество попыток ({max_retries}). Остановка.")
-                raise
-            
-            logger.warning(
-                f"Ошибка при polling (попытка {retry_count}): {e}. "
-                f"Переподключение через 10 секунд..."
-            )
-            await asyncio.sleep(10)
 
 # Configure logging
 logging.basicConfig(
@@ -134,8 +104,8 @@ async def main() -> None:
 
     try:
         logger.info("Bot starting...")
-        # Запуск polling с retry-логикой
-        await start_polling_with_retry(bot, dp)
+        # Запуск polling - aiogram сам обрабатывает сетевые ошибки
+        await dp.start_polling(bot)
     except KeyboardInterrupt:
         logger.info("Получен сигнал остановки")
     except Exception as e:
