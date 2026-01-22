@@ -5,13 +5,16 @@ import time
 import logging
 import sys
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from config import Config
 from database import DatabaseManager
 from api import WBAPIClient
 from api.analytics_client import WBAnalyticsClient
 from telegram import TelegramBot
+
+# Московское время (UTC+3)
+MSK_TIMEZONE = timezone(timedelta(hours=3))
 
 
 class OrderMonitor:
@@ -51,6 +54,7 @@ class OrderMonitor:
         self.is_running = False
         self.last_daily_report_date = None  # Дата последнего отчета
         self.last_views_report_date = None  # Дата последнего отчета о просмотрах
+        self._report_sending_lock = False  # Блокировка для предотвращения параллельной отправки
     
     def _initialize_chat_id(self) -> None:
         """Инициализирует chat_id из БД или получает его от пользователя"""
@@ -227,39 +231,50 @@ class OrderMonitor:
             sys.stderr.flush()
     
     def _check_and_send_daily_report(self) -> None:
-        """Проверяет время и отправляет ежедневные отчеты в 00:00 и 05:00"""
-        now = datetime.utcnow()
+        """Проверяет время и отправляет ежедневные отчеты в 00:00 и 05:00 (московское время)"""
+        # Используем московское время (UTC+3)
+        now = datetime.now(MSK_TIMEZONE)
         current_date = now.date()
+        
+        # Блокировка для предотвращения параллельной отправки
+        if self._report_sending_lock:
+            return
         
         # Логируем проверку времени, если мы в окнах отчетов (для отладки)
         if (now.hour == 0 and now.minute <= 5) or (now.hour == 5 and now.minute <= 5):
-            self.logger.debug(f"Проверка времени отчета: {now.hour:02d}:{now.minute:02d} UTC, дата: {current_date}")
+            self.logger.debug(f"Проверка времени отчета: {now.hour:02d}:{now.minute:02d} MSK, дата: {current_date}")
         
-        # Отчет о заказах в 00:00-00:05
+        # Отчет о заказах в 00:00-00:05 (московское время)
         if now.hour == 0 and now.minute <= 5:
-            self.logger.debug(f"Проверка времени для отчета о заказах: {now.hour}:{now.minute:02d}")
+            self.logger.debug(f"Проверка времени для отчета о заказах: {now.hour}:{now.minute:02d} MSK")
             # Отправляем отчет только один раз за день
             if self.last_daily_report_date != current_date:
-                # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
-                self.last_daily_report_date = current_date
-                
-                # Получаем статистику за вчерашний день
-                yesterday = current_date - timedelta(days=1)
-                yesterday_str = yesterday.strftime('%Y-%m-%d')
-                orders_count = self.db_manager.get_orders_count_for_date(yesterday_str)
-                
-                # Отправляем статистику с retry-логикой
-                self.logger.info(f"Отправка ежедневной статистики за {yesterday_str}: {orders_count} заказов")
-                sys.stdout.flush()
-                if self.telegram_bot.send_daily_statistics(orders_count, yesterday_str):
-                    self.logger.info("Ежедневная статистика успешно отправлена")
-                else:
-                    self.logger.warning("Не удалось отправить ежедневную статистику")
-                sys.stdout.flush()
+                # Устанавливаем блокировку СРАЗУ
+                self._report_sending_lock = True
+                try:
+                    # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
+                    self.last_daily_report_date = current_date
+                    
+                    # Получаем статистику за вчерашний день
+                    yesterday = current_date - timedelta(days=1)
+                    yesterday_str = yesterday.strftime('%Y-%m-%d')
+                    orders_count = self.db_manager.get_orders_count_for_date(yesterday_str)
+                    
+                    # Отправляем статистику с retry-логикой
+                    self.logger.info(f"Отправка ежедневной статистики за {yesterday_str}: {orders_count} заказов")
+                    sys.stdout.flush()
+                    if self.telegram_bot.send_daily_statistics(orders_count, yesterday_str):
+                        self.logger.info("Ежедневная статистика успешно отправлена")
+                    else:
+                        self.logger.warning("Не удалось отправить ежедневную статистику")
+                    sys.stdout.flush()
+                finally:
+                    # Снимаем блокировку после отправки
+                    self._report_sending_lock = False
         
-        # Отчет о просмотрах карточек в 05:00-05:05
+        # Отчет о просмотрах карточек в 05:00-05:05 (московское время)
         if now.hour == 5 and now.minute <= 5:
-            self.logger.warning(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d}, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+            self.logger.debug(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d} MSK, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
             sys.stdout.flush()
             
             # Проверяем, что analytics_client инициализирован
@@ -272,8 +287,14 @@ class OrderMonitor:
             
             # Отправляем отчет только один раз за день
             if self.last_views_report_date != current_date:
-                # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
-                self.last_views_report_date = current_date
+                # Устанавливаем блокировку СРАЗУ
+                if self._report_sending_lock:
+                    return
+                
+                self._report_sending_lock = True
+                try:
+                    # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
+                    self.last_views_report_date = current_date
                 
                 self.logger.warning(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
                 sys.stdout.flush()
@@ -391,7 +412,7 @@ class OrderMonitor:
                     sys.stdout.flush()
                     
                     # Дата уже обновлена в начале блока, здесь только логируем
-                    self.logger.warning(f"Дата последнего отчета о просмотрах: {self.last_views_report_date}")
+                    self.logger.debug(f"Дата последнего отчета о просмотрах: {self.last_views_report_date}")
                 except Exception as e:
                     self.logger.error(f"Ошибка при получении/отправке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
@@ -406,6 +427,9 @@ class OrderMonitor:
                     if now.hour == 5 and now.minute <= 5:
                         self.last_views_report_date = None
                         self.logger.warning("Ошибка при отправке отчета. Дата сброшена для повторной попытки.")
+                finally:
+                    # Снимаем блокировку после отправки
+                    self._report_sending_lock = False
     
     def get_statistics(self) -> dict:
         """
