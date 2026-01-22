@@ -15,6 +15,41 @@ from src.services.payment_service import PaymentService
 from src.services.user_service import UserService
 from src.bot.handlers import router
 
+# Флаг для корректного завершения
+_shutdown_flag = False
+
+
+async def start_polling_with_retry(bot: Bot, dp: Dispatcher, max_retries: int = None):
+    """
+    Запуск polling с автоматическим переподключением при сетевых ошибках.
+    
+    Args:
+        bot: Экземпляр бота
+        dp: Экземпляр диспетчера
+        max_retries: Максимальное количество попыток (None = бесконечно)
+    """
+    retry_count = 0
+    while not _shutdown_flag:
+        try:
+            logger.info("Запуск polling...")
+            await dp.start_polling(bot)
+            # Если polling завершился без ошибки, выходим
+            break
+        except KeyboardInterrupt:
+            logger.info("Получен сигнал остановки")
+            break
+        except Exception as e:
+            retry_count += 1
+            if max_retries and retry_count > max_retries:
+                logger.error(f"Достигнуто максимальное количество попыток ({max_retries}). Остановка.")
+                raise
+            
+            logger.warning(
+                f"Ошибка при polling (попытка {retry_count}): {e}. "
+                f"Переподключение через 10 секунд..."
+            )
+            await asyncio.sleep(10)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -89,7 +124,9 @@ async def main() -> None:
 
     # Graceful shutdown handler
     def signal_handler(sig, frame):
+        global _shutdown_flag
         logger.info("Received shutdown signal")
+        _shutdown_flag = True
         asyncio.create_task(shutdown(bot, dp))
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -97,7 +134,10 @@ async def main() -> None:
 
     try:
         logger.info("Bot starting...")
-        await dp.start_polling(bot)
+        # Запуск polling с retry-логикой
+        await start_polling_with_retry(bot, dp)
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал остановки")
     except Exception as e:
         logger.error(f"Error in polling: {e}")
     finally:
@@ -106,9 +146,23 @@ async def main() -> None:
 
 async def shutdown(bot: Bot, dp: Dispatcher) -> None:
     """Graceful shutdown."""
+    global _shutdown_flag
+    _shutdown_flag = True
+    
     logger.info("Shutting down...")
-    await bot.session.close()
-    await dp.stop_polling()
+    
+    # Остановка polling
+    try:
+        await dp.stop_polling()
+    except Exception as e:
+        logger.warning(f"Ошибка при остановке polling: {e}")
+    
+    # Закрытие сессии бота
+    try:
+        await bot.session.close()
+    except Exception as e:
+        logger.warning(f"Ошибка при закрытии сессии бота: {e}")
+    
     logger.info("Bot stopped")
 
 

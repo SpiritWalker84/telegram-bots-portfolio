@@ -3,34 +3,15 @@
 """
 import asyncio
 import logging
-import re
-from datetime import datetime, timedelta
+import signal
+import sys
 from typing import Optional
 
-from aiogram import Bot, Dispatcher, F, BaseMiddleware
-from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.fsm.context import FSMContext
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.fsm.storage.memory import MemoryStorage
-from dateutil import parser as date_parser
 
 from src.config import Config
 from src.database.models import Database
-from src.bot.keyboards import (
-    get_main_menu,
-    get_services_keyboard,
-    get_calendar_keyboard,
-    get_times_keyboard,
-    get_confirm_keyboard,
-    get_appointment_keyboard,
-    get_admin_keyboard,
-    get_back_keyboard,
-    get_admin_calendar_keyboard,
-)
-from src.bot.states import BookingStates, AdminStates
-from src.utils.nlp import parse_natural_date, parse_natural_time
-from src.utils.helpers import get_status_ru, get_status_emoji
-from src.services.notifications import notify_admins_about_new_appointment
 from src.services.reminders import check_and_send_reminders
 from src.bot.handlers import router as base_router
 
@@ -92,7 +73,41 @@ dp.include_router(base_router)
 ## Quick booking handler moved to src/bot/handlers.py
 
 
-# ========== Graceful shutdown ==========
+# Флаг для корректного завершения
+_shutdown_flag = False
+
+
+async def start_polling_with_retry(bot: Bot, dp: Dispatcher, max_retries: int = None):
+    """
+    Запуск polling с автоматическим переподключением при сетевых ошибках.
+    
+    Args:
+        bot: Экземпляр бота
+        dp: Экземпляр диспетчера
+        max_retries: Максимальное количество попыток (None = бесконечно)
+    """
+    retry_count = 0
+    while not _shutdown_flag:
+        try:
+            logger.info("Запуск polling...")
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+            # Если polling завершился без ошибки, выходим
+            break
+        except KeyboardInterrupt:
+            logger.info("Получен сигнал остановки")
+            break
+        except Exception as e:
+            retry_count += 1
+            if max_retries and retry_count > max_retries:
+                logger.error(f"Достигнуто максимальное количество попыток ({max_retries}). Остановка.")
+                raise
+            
+            logger.warning(
+                f"Ошибка при polling (попытка {retry_count}): {e}. "
+                f"Переподключение через 10 секунд..."
+            )
+            await asyncio.sleep(10)
+
 
 async def on_startup():
     """Инициализация при запуске"""
@@ -106,8 +121,23 @@ async def on_startup():
 
 async def on_shutdown():
     """Очистка при остановке"""
+    global _shutdown_flag
+    _shutdown_flag = True
+    
     logger.info("Остановка бота...")
-    await bot.session.close()
+    
+    # Остановка polling
+    try:
+        await dp.stop_polling()
+    except Exception as e:
+        logger.warning(f"Ошибка при остановке polling: {e}")
+    
+    # Закрытие сессии бота
+    try:
+        await bot.session.close()
+    except Exception as e:
+        logger.warning(f"Ошибка при закрытии сессии бота: {e}")
+    
     logger.info("Бот остановлен")
 
 
@@ -115,13 +145,25 @@ async def on_shutdown():
 
 async def main():
     """Главная функция"""
+    global _shutdown_flag
+    
     # Регистрация обработчиков startup/shutdown
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     
+    # Обработка сигналов для корректного завершения
+    def signal_handler(sig, frame):
+        global _shutdown_flag
+        logger.info("Получен сигнал завершения")
+        _shutdown_flag = True
+        asyncio.create_task(on_shutdown())
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
-        # Запуск polling
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        # Запуск polling с retry-логикой
+        await start_polling_with_retry(bot, dp)
     except KeyboardInterrupt:
         logger.info("Получен сигнал остановки")
     finally:

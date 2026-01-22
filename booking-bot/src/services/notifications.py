@@ -6,6 +6,8 @@ from typing import Callable, Optional
 
 from aiogram import Bot
 
+from src.utils.retry import retry_send_message
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +42,15 @@ async def notify_admins_about_new_appointment(
 
     sent_messages = []
     for admin in admins:
-        try:
-            msg = await bot.send_message(admin["user_id"], text, parse_mode="Markdown")
+        # Используем retry-логику для отправки сообщения
+        msg = await retry_send_message(
+            func=lambda: bot.send_message(admin["user_id"], text, parse_mode="Markdown"),
+            max_attempts=3,
+            delay=2.0,
+            error_message=f"Не удалось отправить уведомление админу {admin['user_id']}"
+        )
+        if msg is not None:
             sent_messages.append(msg)
-        except Exception as e:
-            logger.error(f"Не удалось отправить уведомление админу {admin['user_id']}: {e}")
 
     async def delete_messages_after_delay() -> None:
         await asyncio.sleep(delete_after_seconds)
