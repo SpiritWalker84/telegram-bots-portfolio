@@ -213,27 +213,43 @@ async def main():
     dp.shutdown.register(on_shutdown)
     
     # Обработка сигналов для корректного завершения
+    # Aiogram сам обрабатывает SIGINT/SIGTERM через dp.start_polling()
+    # Но мы добавляем простой обработчик для установки флага
     def signal_handler(sig, frame):
         global _shutdown_flag
-        logger.info("Получен сигнал завершения")
+        logger.info(f"Получен сигнал завершения: {sig}")
         _shutdown_flag = True
-        asyncio.create_task(on_shutdown())
     
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Регистрируем обработчики сигналов только для Unix-систем
+    if sys.platform != 'win32':
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
     
     try:
         # Запуск polling с retry-логикой
+        # Aiogram сам обрабатывает SIGINT/SIGTERM и вызывает KeyboardInterrupt
         await start_polling_with_retry(bot, dp)
     except KeyboardInterrupt:
-        logger.info("Получен сигнал остановки")
+        logger.info("Получен сигнал остановки (KeyboardInterrupt)")
+        _shutdown_flag = True
+    except asyncio.CancelledError:
+        logger.info("Получен сигнал отмены")
+        _shutdown_flag = True
     finally:
+        if not _shutdown_flag:
+            _shutdown_flag = True
         await on_shutdown()
 
 
 if __name__ == "__main__":
     try:
+        # Используем asyncio.run() который правильно обрабатывает сигналы
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем")
+        # Это должно сработать, если сигнал не был обработан внутри main()
+        print("\nПолучен сигнал остановки (Ctrl+C)")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+        sys.exit(1)
 
