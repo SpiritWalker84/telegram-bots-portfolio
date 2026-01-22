@@ -97,17 +97,17 @@ async def main():
                 # Игнорируем ошибки "query is too old" при остановке бота
                 if "query is too old" in error_msg or "query id is invalid" in error_msg:
                     logger.debug(f"Ignoring old callback query during shutdown: {e}")
-        return
+                    return
                 # Игнорируем ошибку "message is not modified" - это нормально, если сообщение уже имеет нужное содержимое
                 if "message is not modified" in error_msg:
                     logger.debug(f"Ignoring 'message is not modified' error: {e}")
-        return
+                    return
                 raise
-    except Exception as e:
+            except Exception as e:
                 # Если бот останавливается, игнорируем ошибки
                 if _shutdown_flag:
                     logger.debug(f"Ignoring error during shutdown: {e}")
-        return
+                    return
                 raise
     
     dp.message.middleware(DependencyMiddleware())
