@@ -10,7 +10,7 @@
 > [![systemd](https://img.shields.io/badge/systemd-service-green?logo=linux)](https://systemd.io)
 > [![GitHub](https://img.shields.io/badge/GitHub-Portfolio-black?logo=github)](https://github.com/SpiritWalker84/telegram-bots-portfolio)
 
-## ✨ Что умею (демонстрирую на реальных проектах)
+## ✨ Демонстрация проектов
 
 | Бот | Функционал | Стек | Статус |
 |-----|------------|------|--------|
