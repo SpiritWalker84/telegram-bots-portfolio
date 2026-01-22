@@ -55,19 +55,31 @@ async def send_appointment_reminder(*, bot: Bot, db, appointment: Dict[str, Any]
 
 async def check_and_send_reminders(*, bot: Bot, db, minutes_before: int = 30) -> None:
     """Loop: check DB and send reminders periodically."""
-    while True:
-        try:
-            appointments = await db.get_appointments_for_reminder(minutes_before=minutes_before)
+    try:
+        while True:
+            try:
+                appointments = await db.get_appointments_for_reminder(minutes_before=minutes_before)
 
-            for appointment in appointments:
-                await send_appointment_reminder(bot=bot, db=db, appointment=appointment)
-                await asyncio.sleep(0.5)
+                for appointment in appointments:
+                    # Проверяем отмену перед каждой итерацией
+                    await asyncio.sleep(0)  # Даем возможность отменить задачу
+                    await send_appointment_reminder(bot=bot, db=db, appointment=appointment)
+                    await asyncio.sleep(0.5)
 
-            await asyncio.sleep(60)
-        except Exception as e:
-            logger.error(f"Ошибка в задаче проверки напоминаний: {e}")
-            await asyncio.sleep(60)
-        except asyncio.CancelledError:
-            logger.info("Задача проверки напоминаний отменена")
-            break
+                # Проверяем отмену перед длительным sleep
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                logger.info("Задача проверки напоминаний отменена")
+                raise  # Пробрасываем CancelledError дальше
+            except Exception as e:
+                logger.error(f"Ошибка в задаче проверки напоминаний: {e}", exc_info=True)
+                # Проверяем отмену перед повторной попыткой
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    logger.info("Задача проверки напоминаний отменена во время ожидания")
+                    raise
+    except asyncio.CancelledError:
+        logger.info("Задача проверки напоминаний завершена")
+        raise
 

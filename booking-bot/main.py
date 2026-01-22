@@ -54,11 +54,20 @@ async def start_polling_with_retry(bot: Bot, dp: Dispatcher, max_retries: int = 
     while not _shutdown_flag:
         try:
             logger.info("Запуск polling...")
+            # Проверяем отмену перед запуском polling
+            if _shutdown_flag:
+                logger.info("Получен сигнал остановки перед запуском polling")
+                break
+            
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
             # Если polling завершился без ошибки, выходим
+            logger.info("Polling завершен нормально")
             break
         except KeyboardInterrupt:
-            logger.info("Получен сигнал остановки")
+            logger.info("Получен сигнал остановки (KeyboardInterrupt)")
+            break
+        except asyncio.CancelledError:
+            logger.info("Polling отменен")
             break
         except Exception as e:
             retry_count += 1
@@ -70,7 +79,13 @@ async def start_polling_with_retry(bot: Bot, dp: Dispatcher, max_retries: int = 
                 f"Ошибка при polling (попытка {retry_count}): {e}. "
                 f"Переподключение через 10 секунд..."
             )
-            await asyncio.sleep(10)
+            
+            # Проверяем отмену во время ожидания
+            for _ in range(10):
+                if _shutdown_flag:
+                    logger.info("Получен сигнал остановки во время ожидания переподключения")
+                    return
+                await asyncio.sleep(1)
 
 
 
@@ -122,22 +137,38 @@ async def main():
     # Register router
     dp.include_router(base_router)
     
+    # Переменная для хранения фоновой задачи
+    reminder_task = None
+    
     # Регистрация обработчиков startup/shutdown
     async def on_startup():
         """Инициализация при запуске"""
+        nonlocal reminder_task
         logger.info("Запуск бота...")
         await db.init_db()
         logger.info("Бот запущен")
-        # Запускаем фоновую задачу для проверки напоминаний
-        asyncio.create_task(check_and_send_reminders(bot=bot, db=db, minutes_before=30))
+        # Запускаем фоновую задачу для проверки напоминаний и сохраняем ссылку
+        reminder_task = asyncio.create_task(check_and_send_reminders(bot=bot, db=db, minutes_before=30))
         logger.info("Задача проверки напоминаний запущена")
     
     async def on_shutdown():
         """Очистка при остановке"""
+        nonlocal reminder_task
         global _shutdown_flag
         _shutdown_flag = True
         
         logger.info("Остановка бота...")
+        
+        # Отменяем фоновую задачу проверки напоминаний
+        if reminder_task and not reminder_task.done():
+            logger.info("Отмена задачи проверки напоминаний...")
+            reminder_task.cancel()
+            try:
+                await reminder_task
+            except asyncio.CancelledError:
+                logger.info("Задача проверки напоминаний отменена")
+            except Exception as e:
+                logger.warning(f"Ошибка при отмене задачи проверки напоминаний: {e}")
         
         # Остановка polling
         try:
