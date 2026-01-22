@@ -1,5 +1,105 @@
 # 🤖 Telegram Bots Portfolio
 
+> **Telegram Bots Portfolio (Production-ready)**
+> 
+> 2 production-бота развернуты на Ubuntu VPS + systemd  
+> **Live demo:** [@brooking_bbot](https://t.me/brooking_bbot) | [@reminderdemo_bot](https://t.me/reminderdemo_bot)
+> 
+> [![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-orange?logo=ubuntu)](https://ubuntu.com)
+> [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
+> [![systemd](https://img.shields.io/badge/systemd-service-green?logo=linux)](https://systemd.io)
+> [![GitHub](https://img.shields.io/badge/GitHub-Portfolio-black?logo=github)](https://github.com/SpiritWalker84/telegram-bots-portfolio)
+
+## ✨ Что умею (демонстрирую на реальных проектах)
+
+| Бот | Функционал | Стек | Статус |
+|-----|------------|------|--------|
+| **Booking Bot** | Бронирование услуг салона красоты<br>Календарь, базы данных, админ-панель | aiogram 3.x • SQLite • FSM • Pydantic | 🟢 **LIVE** [@brooking_bbot](https://t.me/brooking_bbot) |
+| **Reminder Bot** | Напоминания с планировщиком<br>Расписание, уведомления | aiogram 3.x • SQLite • asyncio | 🟢 **LIVE** [@reminderdemo_bot](https://t.me/reminderdemo_bot) |
+
+## 🛠 Tech Stack
+
+- **🐍 Python 3.11+** • **aiogram 3.x** • **asyncio**
+- **🗄️ SQLite3** • **aiosqlite** (асинхронная работа с БД)
+- **⚙️ Pydantic Settings** (конфигурация)
+- **🐧 Ubuntu 24.04** + **systemd services**
+- **📦 Git** • **GitHub** (версионирование)
+- **🔧 SSH** • **production deploy**
+
+## 🔧 Production Deployment
+
+### Systemd Service
+
+Пример unit file для запуска бота как системного сервиса:
+
+```ini
+[Unit]
+Description=Telegram Booking Bot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=rinat
+Group=rinat
+WorkingDirectory=/home/rinat/telegram-bots-portfolio/booking-bot
+ExecStart=/home/rinat/telegram-bots-portfolio/booking-bot/run.sh
+Restart=always
+RestartSec=5
+Environment=PATH=/home/rinat/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Установка:**
+```bash
+# Создать unit file
+sudo nano /etc/systemd/system/booking-bot.service
+# Скопировать содержимое выше
+
+# Включить автозапуск
+sudo systemctl enable booking-bot.service
+
+# Запустить сервис
+sudo systemctl start booking-bot.service
+
+# Проверка статуса
+sudo systemctl status booking-bot.service
+```
+
+**Управление:**
+```bash
+# Просмотр логов
+sudo journalctl -u booking-bot -f
+
+# Перезапуск
+sudo systemctl restart booking-bot.service
+
+# Остановка
+sudo systemctl stop booking-bot.service
+```
+
+## 🚀 Быстрый старт (5 минут)
+
+```bash
+git clone https://github.com/SpiritWalker84/telegram-bots-portfolio
+cd telegram-bots-portfolio/booking-bot
+./run.sh  # автоматическая установка и запуск
+```
+
+---
+
+## ✅ Production опыт
+
+- ✅ **2 бота 24/7 на VPS** — работают в продакшене
+- ✅ **Full-stack** — Python backend + Linux DevOps
+- ✅ **Live демо** — боты работают прямо сейчас
+- ✅ **Clean code** — модульная архитектура, документация
+- ✅ **Freelance-ready** — готов к коммерческим задачам
+
+---
+
 Коллекция Telegram-ботов на Python, созданных для демонстрации различных возможностей и технологий.
 
 ## 📸 Скриншоты
