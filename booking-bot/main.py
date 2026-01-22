@@ -15,43 +15,7 @@ from src.database.models import Database
 from src.services.reminders import check_and_send_reminders
 from src.bot.handlers import router as base_router
 
-# Загрузка конфигурации
-config = Config.load()
-if not config.validate():
-    raise ValueError("Configuration validation failed. Please check your .env file.")
-
-# Настройка логирования
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(config.LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
-
-# Инициализация бота и диспетчера
-bot = Bot(token=config.BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
-db = Database(config.DB_PATH)
-
-
-# Dependency injection for Router-based handlers
-class DependencyMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
-        data["db"] = db
-        data["admin_id"] = config.ADMIN_ID
-        data["bot"] = bot
-        data["config"] = config  # Pass config for handlers that need it
-        return await handler(event, data)
-
-
-dp.message.middleware(DependencyMiddleware())
-dp.callback_query.middleware(DependencyMiddleware())
-
-# Register router (we migrate legacy handlers gradually)
-dp.include_router(base_router)
 
 
 ## Helper functions moved to src/utils/helpers.py
@@ -109,36 +73,6 @@ async def start_polling_with_retry(bot: Bot, dp: Dispatcher, max_retries: int = 
             await asyncio.sleep(10)
 
 
-async def on_startup():
-    """Инициализация при запуске"""
-    logger.info("Запуск бота...")
-    await db.init_db()
-    logger.info("Бот запущен")
-    # Запускаем фоновую задачу для проверки напоминаний
-    asyncio.create_task(check_and_send_reminders(bot=bot, db=db, minutes_before=30))
-    logger.info("Задача проверки напоминаний запущена")
-
-
-async def on_shutdown():
-    """Очистка при остановке"""
-    global _shutdown_flag
-    _shutdown_flag = True
-    
-    logger.info("Остановка бота...")
-    
-    # Остановка polling
-    try:
-        await dp.stop_polling()
-    except Exception as e:
-        logger.warning(f"Ошибка при остановке polling: {e}")
-    
-    # Закрытие сессии бота
-    try:
-        await bot.session.close()
-    except Exception as e:
-        logger.warning(f"Ошибка при закрытии сессии бота: {e}")
-    
-    logger.info("Бот остановлен")
 
 
 # ========== Главная функция ==========
@@ -147,7 +81,78 @@ async def main():
     """Главная функция"""
     global _shutdown_flag
     
+    # Загрузка конфигурации
+    try:
+        config = Config.load()
+        if not config.validate():
+            logger.error("Configuration validation failed. Please check your .env file.")
+            sys.exit(1)
+    except Exception as e:
+        logger.error(f"Error loading configuration: {e}")
+        sys.exit(1)
+    
+    # Настройка логирования
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(config.LOG_FILE, encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+    logger.info("Configuration loaded and logging configured")
+    
+    # Инициализация бота и диспетчера
+    bot = Bot(token=config.BOT_TOKEN)
+    dp = Dispatcher(storage=MemoryStorage())
+    db = Database(config.DB_PATH)
+    
+    # Dependency injection for Router-based handlers
+    class DependencyMiddleware(BaseMiddleware):
+        async def __call__(self, handler, event, data):
+            data["db"] = db
+            data["admin_id"] = config.ADMIN_ID
+            data["bot"] = bot
+            data["config"] = config  # Pass config for handlers that need it
+            return await handler(event, data)
+    
+    dp.message.middleware(DependencyMiddleware())
+    dp.callback_query.middleware(DependencyMiddleware())
+    
+    # Register router
+    dp.include_router(base_router)
+    
     # Регистрация обработчиков startup/shutdown
+    async def on_startup():
+        """Инициализация при запуске"""
+        logger.info("Запуск бота...")
+        await db.init_db()
+        logger.info("Бот запущен")
+        # Запускаем фоновую задачу для проверки напоминаний
+        asyncio.create_task(check_and_send_reminders(bot=bot, db=db, minutes_before=30))
+        logger.info("Задача проверки напоминаний запущена")
+    
+    async def on_shutdown():
+        """Очистка при остановке"""
+        global _shutdown_flag
+        _shutdown_flag = True
+        
+        logger.info("Остановка бота...")
+        
+        # Остановка polling
+        try:
+            await dp.stop_polling()
+        except Exception as e:
+            logger.warning(f"Ошибка при остановке polling: {e}")
+        
+        # Закрытие сессии бота
+        try:
+            await bot.session.close()
+        except Exception as e:
+            logger.warning(f"Ошибка при закрытии сессии бота: {e}")
+        
+        logger.info("Бот остановлен")
+    
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     
