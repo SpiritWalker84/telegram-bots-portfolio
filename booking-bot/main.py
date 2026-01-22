@@ -14,6 +14,7 @@ from src.config import Config
 from src.database.models import Database
 from src.services.reminders import check_and_send_reminders
 from src.bot.handlers import router as base_router
+from aiogram.exceptions import TelegramBadRequest
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +132,27 @@ async def main():
             data["config"] = config  # Pass config for handlers that need it
             return await handler(event, data)
     
+    # Middleware для безопасной обработки callback при остановке
+    class SafeCallbackMiddleware(BaseMiddleware):
+        async def __call__(self, handler, event, data):
+            try:
+                return await handler(event, data)
+            except TelegramBadRequest as e:
+                # Игнорируем ошибки "query is too old" при остановке бота
+                if "query is too old" in str(e).lower() or "query id is invalid" in str(e).lower():
+                    logger.debug(f"Ignoring old callback query during shutdown: {e}")
+                    return
+                raise
+            except Exception as e:
+                # Если бот останавливается, игнорируем ошибки
+                if _shutdown_flag:
+                    logger.debug(f"Ignoring error during shutdown: {e}")
+                    return
+                raise
+    
     dp.message.middleware(DependencyMiddleware())
     dp.callback_query.middleware(DependencyMiddleware())
+    dp.callback_query.middleware(SafeCallbackMiddleware())
     
     # Register router
     dp.include_router(base_router)
@@ -170,15 +190,20 @@ async def main():
             except Exception as e:
                 logger.warning(f"Ошибка при отмене задачи проверки напоминаний: {e}")
         
-        # Остановка polling
+        # Остановка polling (это остановит обработку новых обновлений)
         try:
             await dp.stop_polling()
+            logger.info("Polling остановлен")
         except Exception as e:
             logger.warning(f"Ошибка при остановке polling: {e}")
+        
+        # Даем время на завершение обработки текущих обновлений
+        await asyncio.sleep(1)
         
         # Закрытие сессии бота
         try:
             await bot.session.close()
+            logger.info("Сессия бота закрыта")
         except Exception as e:
             logger.warning(f"Ошибка при закрытии сессии бота: {e}")
         
