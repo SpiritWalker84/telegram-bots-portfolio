@@ -44,6 +44,11 @@ class DatabaseManager:
         # Получаем директорию для файла БД
         db_dir = os.path.dirname(abs_path)
         
+        # Если директория пустая (файл в корне), используем текущую директорию
+        if not db_dir:
+            db_dir = os.getcwd()
+            abs_path = os.path.join(db_dir, os.path.basename(db_path))
+        
         # Создаем директорию, если её нет
         if db_dir and not os.path.exists(db_dir):
             try:
@@ -52,6 +57,13 @@ class DatabaseManager:
             except OSError as e:
                 self.logger.error(f"Не удалось создать директорию {db_dir}: {e}")
                 raise
+        
+        # Проверяем права на запись в директорию
+        if db_dir and os.path.exists(db_dir):
+            if not os.access(db_dir, os.W_OK):
+                error_msg = f"Нет прав на запись в директорию {db_dir}"
+                self.logger.error(error_msg)
+                raise PermissionError(error_msg)
         
         return abs_path
     
@@ -63,17 +75,38 @@ class DatabaseManager:
         Yields:
             sqlite3.Connection: Подключение к базе данных
         """
+        conn = None
         try:
-            conn = sqlite3.connect(self.db_path)
+            # Проверяем, что директория существует и доступна для записи
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir and not os.path.exists(db_dir):
+                error_msg = f"Директория {db_dir} не существует"
+                self.logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
+            
+            if db_dir and not os.access(db_dir, os.W_OK):
+                error_msg = f"Нет прав на запись в директорию {db_dir}"
+                self.logger.error(error_msg)
+                raise PermissionError(error_msg)
+            
+            # Пытаемся подключиться к БД
+            self.logger.debug(f"Подключение к базе данных: {self.db_path}")
+            conn = sqlite3.connect(self.db_path, timeout=10.0)
             conn.row_factory = sqlite3.Row
+            self.logger.debug("Подключение к базе данных установлено")
         except sqlite3.OperationalError as e:
-            self.logger.error(
+            error_msg = (
                 f"Не удалось открыть базу данных {self.db_path}: {e}. "
-                f"Проверьте права доступа к файлу и директории."
+                f"Проверьте права доступа к файлу и директории {db_dir if db_dir else 'текущей'}. "
+                f"Абсолютный путь: {os.path.abspath(self.db_path)}"
             )
+            self.logger.error(error_msg)
+            raise
+        except (FileNotFoundError, PermissionError) as e:
+            self.logger.error(f"Ошибка доступа к БД: {e}")
             raise
         except Exception as e:
-            self.logger.error(f"Неожиданная ошибка при подключении к БД: {e}")
+            self.logger.error(f"Неожиданная ошибка при подключении к БД: {e}", exc_info=True)
             raise
         
         try:
