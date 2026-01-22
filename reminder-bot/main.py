@@ -30,12 +30,12 @@ async def main():
         logger.info("✅ Конфигурация загружена")
     except ValueError as e:
         logger.error(f"❌ Ошибка конфигурации: {e}")
-        return
+        sys.exit(1)
     except Exception as e:
         logger.error(f"❌ Неожиданная ошибка при загрузке конфигурации: {e}")
         import traceback
         traceback.print_exc()
-        return
+        sys.exit(1)
     
     # Инициализация бота и диспетчера
     bot = Bot(token=config.bot_token)
@@ -80,9 +80,8 @@ async def main():
     except KeyboardInterrupt:
         logger.info("\n⏹️  Остановка бота...")
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Критическая ошибка в main(): {e}", exc_info=True)
+        # Не выходим сразу, даем возможность корректно завершиться
     finally:
         await shutdown(bot, dp, reminder_service)
 

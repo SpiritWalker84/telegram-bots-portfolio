@@ -1,5 +1,6 @@
 """Сервис для отправки напоминаний."""
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -8,6 +9,8 @@ if TYPE_CHECKING:
 
 from src.utils.retry import retry_send_message
 from src.bot.keyboards import get_main_menu
+
+logger = logging.getLogger(__name__)
 
 
 class ReminderService:
@@ -52,9 +55,11 @@ class ReminderService:
                 await self.db.remove_expired_tasks()
             except asyncio.CancelledError:
                 # Корректное завершение при отмене задачи
+                logger.info("Reminder loop cancelled")
                 break
             except Exception as e:
-                print(f"Ошибка в reminder_loop: {e}")
+                logger.error(f"Ошибка в reminder_loop: {e}", exc_info=True)
+                # Продолжаем работу даже при ошибке
             
             # Защита от зависания: проверяем флаг перед sleep
             if not self._running:
@@ -63,35 +68,45 @@ class ReminderService:
             try:
                 await asyncio.sleep(60)  # Проверка каждые 60 секунд
             except asyncio.CancelledError:
+                logger.info("Reminder loop sleep cancelled")
                 break
     
     async def _send_reminders(self) -> None:
         """Отправляет напоминания пользователям о задачах, время которых наступило."""
-        tasks = await self.db.get_pending_tasks_for_reminder()
+        try:
+            tasks = await self.db.get_pending_tasks_for_reminder()
+        except Exception as e:
+            logger.error(f"Ошибка при получении задач для напоминания: {e}", exc_info=True)
+            return
         
         for task in tasks:
-            user_id = task["user_id"]
-            task_text = task["text"]
-            task_id = task["id"]
-            
-            message = f"🔔 Напоминание!\n\nЗадача #{task_id}: {task_text}"
-            
-            # Используем retry-логику для отправки сообщения
-            result = await retry_send_message(
-                func=lambda: self.bot.send_message(chat_id=user_id, text=message),
-                max_attempts=3,
-                delay=2.0,
-                error_message=f"Ошибка при отправке напоминания пользователю {user_id}"
-            )
-            
-            # Отмечаем задачу как выполненную только если сообщение отправлено успешно
-            if result is not None:
-                await self.db.mark_task_done(task_id, user_id)
+            try:
+                user_id = task["user_id"]
+                task_text = task["text"]
+                task_id = task["id"]
                 
-                # Через 5 секунд отправляем главное меню
-                async def send_main_menu_after_delay():
-                    await asyncio.sleep(5)
-                    welcome_text = """
+                message = f"🔔 Напоминание!\n\nЗадача #{task_id}: {task_text}"
+                
+                # Используем retry-логику для отправки сообщения
+                result = await retry_send_message(
+                    func=lambda: self.bot.send_message(chat_id=user_id, text=message),
+                    max_attempts=3,
+                    delay=2.0,
+                    error_message=f"Ошибка при отправке напоминания пользователю {user_id}"
+                )
+                
+                # Отмечаем задачу как выполненную только если сообщение отправлено успешно
+                if result is not None:
+                    try:
+                        await self.db.mark_task_done(task_id, user_id)
+                    except Exception as e:
+                        logger.error(f"Ошибка при отметке задачи {task_id} как выполненной: {e}", exc_info=True)
+                    
+                    # Через 5 секунд отправляем главное меню
+                    async def send_main_menu_after_delay():
+                        try:
+                            await asyncio.sleep(5)
+                            welcome_text = """
 👋 Привет! Я бот-напоминатель задач.
 
 Используйте кнопки ниже для управления задачами, или команды:
@@ -108,16 +123,22 @@ class ReminderService:
 /add Встреча в 2025-12-26 15:00
 /add Оплатить счёт завтра 18:00
 """
-                    await retry_send_message(
-                        func=lambda: self.bot.send_message(
-                            chat_id=user_id,
-                            text=welcome_text,
-                            reply_markup=get_main_menu()
-                        ),
-                        max_attempts=3,
-                        delay=2.0,
-                        error_message=f"Ошибка при отправке главного меню пользователю {user_id}"
-                    )
-                
-                # Запускаем задачу для отправки главного меню через 5 секунд
-                asyncio.create_task(send_main_menu_after_delay())
+                            await retry_send_message(
+                                func=lambda: self.bot.send_message(
+                                    chat_id=user_id,
+                                    text=welcome_text,
+                                    reply_markup=get_main_menu()
+                                ),
+                                max_attempts=3,
+                                delay=2.0,
+                                error_message=f"Ошибка при отправке главного меню пользователю {user_id}"
+                            )
+                        except Exception as e:
+                            logger.error(f"Ошибка при отправке главного меню пользователю {user_id}: {e}", exc_info=True)
+                    
+                    # Запускаем задачу для отправки главного меню через 5 секунд
+                    asyncio.create_task(send_main_menu_after_delay())
+            except Exception as e:
+                logger.error(f"Ошибка при обработке задачи {task.get('id', 'unknown')}: {e}", exc_info=True)
+                # Продолжаем обработку следующих задач
+                continue
