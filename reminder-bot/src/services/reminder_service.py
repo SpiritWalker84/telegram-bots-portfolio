@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from src.database.models import Database
 
 from src.utils.retry import retry_send_message
+from src.bot.keyboards import get_main_menu
 
 
 class ReminderService:
@@ -86,3 +87,37 @@ class ReminderService:
             # Отмечаем задачу как выполненную только если сообщение отправлено успешно
             if result is not None:
                 await self.db.mark_task_done(task_id, user_id)
+                
+                # Через 5 секунд отправляем главное меню
+                async def send_main_menu_after_delay():
+                    await asyncio.sleep(5)
+                    welcome_text = """
+👋 Привет! Я бот-напоминатель задач.
+
+Используйте кнопки ниже для управления задачами, или команды:
+
+📋 Команды:
+/add <текст> [время] — добавить задачу
+/list — показать все задачи
+/done <id> — отметить как выполненную
+/delete <id> — удалить задачу
+/settings — настройки
+
+💡 Примеры:
+/add Купить молоко в 14:30
+/add Встреча в 2025-12-26 15:00
+/add Оплатить счёт завтра 18:00
+"""
+                    await retry_send_message(
+                        func=lambda: self.bot.send_message(
+                            chat_id=user_id,
+                            text=welcome_text,
+                            reply_markup=get_main_menu()
+                        ),
+                        max_attempts=3,
+                        delay=2.0,
+                        error_message=f"Ошибка при отправке главного меню пользователю {user_id}"
+                    )
+                
+                # Запускаем задачу для отправки главного меню через 5 секунд
+                asyncio.create_task(send_main_menu_after_delay())
