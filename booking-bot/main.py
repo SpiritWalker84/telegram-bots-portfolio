@@ -42,51 +42,6 @@ logger = logging.getLogger(__name__)
 _shutdown_flag = False
 
 
-async def start_polling_with_retry(bot: Bot, dp: Dispatcher, max_retries: int = None):
-    """
-    Запуск polling с автоматическим переподключением при сетевых ошибках.
-    
-    Args:
-        bot: Экземпляр бота
-        dp: Экземпляр диспетчера
-        max_retries: Максимальное количество попыток (None = бесконечно)
-    """
-    retry_count = 0
-    while not _shutdown_flag:
-        try:
-            logger.info("Запуск polling...")
-            # Проверяем отмену перед запуском polling
-            if _shutdown_flag:
-                logger.info("Получен сигнал остановки перед запуском polling")
-                break
-            
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-            # Если polling завершился без ошибки, выходим
-            logger.info("Polling завершен нормально")
-            break
-        except KeyboardInterrupt:
-            logger.info("Получен сигнал остановки (KeyboardInterrupt)")
-            break
-        except asyncio.CancelledError:
-            logger.info("Polling отменен")
-            break
-        except Exception as e:
-            retry_count += 1
-            if max_retries and retry_count > max_retries:
-                logger.error(f"Достигнуто максимальное количество попыток ({max_retries}). Остановка.")
-                raise
-            
-            logger.warning(
-                f"Ошибка при polling (попытка {retry_count}): {e}. "
-                f"Переподключение через 10 секунд..."
-            )
-            
-            # Проверяем отмену во время ожидания
-            for _ in range(10):
-                if _shutdown_flag:
-                    logger.info("Получен сигнал остановки во время ожидания переподключения")
-                    return
-                await asyncio.sleep(1)
 
 
 
@@ -231,14 +186,17 @@ async def main():
         signal.signal(signal.SIGTERM, signal_handler)
     
     try:
-        # Запуск polling с retry-логикой
-        # Aiogram сам обрабатывает SIGINT/SIGTERM и вызывает KeyboardInterrupt
-        await start_polling_with_retry(bot, dp)
+        # Запуск polling - aiogram сам обрабатывает SIGINT/SIGTERM и сетевые ошибки
+        logger.info("Запуск polling...")
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except KeyboardInterrupt:
         logger.info("Получен сигнал остановки (KeyboardInterrupt)")
         _shutdown_flag = True
     except asyncio.CancelledError:
         logger.info("Получен сигнал отмены")
+        _shutdown_flag = True
+    except Exception as e:
+        logger.error(f"Критическая ошибка при polling: {e}", exc_info=True)
         _shutdown_flag = True
     finally:
         if not _shutdown_flag:
