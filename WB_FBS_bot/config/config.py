@@ -85,6 +85,15 @@ class Config:
         if not telegram_bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN не установлен в переменных окружения")
         
+        # Получаем путь к БД из переменной окружения или используем значение по умолчанию
+        db_path = os.getenv("DB_PATH", cls.db_path)
+        
+        # Если путь относительный, делаем его абсолютным относительно директории проекта
+        if not os.path.isabs(db_path):
+            # Получаем директорию проекта (на уровень выше config/)
+            project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            db_path = os.path.join(project_dir, db_path)
+        
         return cls(
             wb_api_key=wb_api_key,
             telegram_bot_token=telegram_bot_token,
@@ -92,7 +101,7 @@ class Config:
             wb_api_url=os.getenv("WB_API_URL", cls.wb_api_url),
             wb_analytics_api_key=os.getenv("WB_ANALYTICS_API_KEY"),  # Опционально
             wb_poll_interval=int(os.getenv("WB_POLL_INTERVAL", cls.wb_poll_interval)),
-            db_path=os.getenv("DB_PATH", cls.db_path)
+            db_path=db_path
         )
     
     @classmethod

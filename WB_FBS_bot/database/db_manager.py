@@ -3,6 +3,7 @@
 """
 import sqlite3
 import logging
+import os
 from typing import List, Optional
 from contextlib import contextmanager
 
@@ -17,9 +18,42 @@ class DatabaseManager:
         Args:
             db_path: Путь к файлу базы данных
         """
-        self.db_path = db_path
         self.logger = logging.getLogger(__name__)
+        # Нормализуем путь: делаем абсолютным и создаем директорию, если нужно
+        self.db_path = self._normalize_db_path(db_path)
+        self.logger.info(f"Используется база данных: {self.db_path}")
         self._init_database()
+    
+    def _normalize_db_path(self, db_path: str) -> str:
+        """
+        Нормализует путь к базе данных: делает абсолютным и создает директорию
+        
+        Args:
+            db_path: Исходный путь к БД
+            
+        Returns:
+            str: Абсолютный путь к БД
+        """
+        # Если путь уже абсолютный, используем его
+        if os.path.isabs(db_path):
+            abs_path = db_path
+        else:
+            # Делаем путь абсолютным относительно текущей рабочей директории
+            abs_path = os.path.abspath(db_path)
+        
+        # Получаем директорию для файла БД
+        db_dir = os.path.dirname(abs_path)
+        
+        # Создаем директорию, если её нет
+        if db_dir and not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, mode=0o755, exist_ok=True)
+                self.logger.info(f"Создана директория для базы данных: {db_dir}")
+            except OSError as e:
+                self.logger.error(f"Не удалось создать директорию {db_dir}: {e}")
+                raise
+        
+        return abs_path
     
     @contextmanager
     def _get_connection(self):
@@ -29,8 +63,19 @@ class DatabaseManager:
         Yields:
             sqlite3.Connection: Подключение к базе данных
         """
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+        except sqlite3.OperationalError as e:
+            self.logger.error(
+                f"Не удалось открыть базу данных {self.db_path}: {e}. "
+                f"Проверьте права доступа к файлу и директории."
+            )
+            raise
+        except Exception as e:
+            self.logger.error(f"Неожиданная ошибка при подключении к БД: {e}")
+            raise
+        
         try:
             yield conn
             conn.commit()
