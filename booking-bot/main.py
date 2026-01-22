@@ -163,12 +163,12 @@ async def main():
             logger.warning(f"Ошибка при остановке polling: {e}")
     
         # Закрытие сессии бота с таймаутом
-            try:
+        try:
             await asyncio.wait_for(bot.session.close(), timeout=2.0)
             logger.info("Сессия бота закрыта")
         except asyncio.TimeoutError:
             logger.warning("Таймаут при закрытии сессии бота")
-            except Exception as e:
+        except Exception as e:
             logger.warning(f"Ошибка при закрытии сессии бота: {e}")
         
     logger.info("Бот остановлен")
