@@ -200,23 +200,33 @@ class OrderMonitor:
             
             new_orders_count = 0
             for order in orders:
-                if not self.db_manager.is_order_processed(order.order_uid):
-                    # Отправляем уведомление с retry-логикой
-                    if self.telegram_bot.send_order_notification(order):
-                        # Помечаем заказ как обработанный
-                        self.db_manager.mark_order_as_processed(
-                            order.order_uid,
-                            order.order_id,
-                            order.created_at
-                        )
-                        new_orders_count += 1
-                        self.logger.info(f"Новый заказ обработан: {order.order_uid}")
-                        sys.stdout.flush()
+                try:
+                    # Проверяем, был ли заказ обработан (с retry-логикой)
+                    if not self.db_manager.is_order_processed(order.order_uid):
+                        # Отправляем уведомление с retry-логикой
+                        if self.telegram_bot.send_order_notification(order):
+                            # Помечаем заказ как обработанный (с retry-логикой)
+                            self.db_manager.mark_order_as_processed(
+                                order.order_uid,
+                                order.order_id,
+                                order.created_at
+                            )
+                            new_orders_count += 1
+                            self.logger.info(f"Новый заказ обработан: {order.order_uid}")
+                            sys.stdout.flush()
+                        else:
+                            self.logger.warning(f"Не удалось отправить уведомление для заказа: {order.order_uid}")
+                            sys.stdout.flush()
                     else:
-                        self.logger.warning(f"Не удалось отправить уведомление для заказа: {order.order_uid}")
-                        sys.stdout.flush()
-                else:
-                    self.logger.debug(f"Заказ {order.order_uid} уже был обработан")
+                        self.logger.debug(f"Заказ {order.order_uid} уже был обработан")
+                except Exception as e:
+                    # Ошибка при обработке одного заказа - логируем и продолжаем
+                    self.logger.warning(
+                        f"Ошибка при обработке заказа {order.order_uid}: {e}. "
+                        f"Заказ будет обработан при следующей проверке."
+                    )
+                    sys.stdout.flush()
+                    continue
             
             if new_orders_count > 0:
                 self.logger.info(f"Обработано новых заказов: {new_orders_count}")

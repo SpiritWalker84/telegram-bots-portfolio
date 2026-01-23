@@ -4,8 +4,66 @@
 import sqlite3
 import logging
 import os
-from typing import List, Optional
+import time
+from typing import List, Optional, Callable, TypeVar, Any
 from contextlib import contextmanager
+from functools import wraps
+
+T = TypeVar('T')
+
+
+def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float = 2.0):
+    """
+    Декоратор для повторных попыток операций с БД при временных блокировках
+    
+    Args:
+        max_retries: Максимальное количество попыток
+        delay: Начальная задержка между попытками (секунды)
+        backoff: Множитель для увеличения задержки
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(self, *args, **kwargs) -> T:
+            last_exception = None
+            current_delay = delay
+            
+            for attempt in range(max_retries):
+                try:
+                    return func(self, *args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    # Проверяем, является ли это временной блокировкой
+                    error_msg = str(e).lower()
+                    is_temporary = (
+                        'locked' in error_msg or 
+                        'database is locked' in error_msg or
+                        ('unable to open database file' in error_msg and attempt < max_retries - 1)
+                    )
+                    
+                    if is_temporary:
+                        last_exception = e
+                        if attempt < max_retries - 1:
+                            self.logger.debug(
+                                f"Временная ошибка БД при {func.__name__}: {e}, "
+                                f"попытка {attempt + 1}/{max_retries}, ждем {current_delay:.2f}с"
+                            )
+                            time.sleep(current_delay)
+                            current_delay *= backoff
+                            continue
+                    # Если это не временная блокировка или попытки исчерпаны, пробрасываем ошибку дальше
+                    raise
+                except Exception as e:
+                    # Для других ошибок не делаем retry
+                    raise
+            
+            # Если все попытки исчерпаны, пробрасываем последнюю ошибку
+            if last_exception:
+                self.logger.warning(
+                    f"Не удалось выполнить {func.__name__} после {max_retries} попыток: {last_exception}"
+                )
+                raise last_exception
+            
+        return wrapper
+    return decorator
 
 
 class DatabaseManager:
@@ -99,12 +157,19 @@ class DatabaseManager:
                 self.logger.error(error_msg)
                 raise PermissionError(error_msg)
             
-            # Пытаемся подключиться к БД
+            # Пытаемся подключиться к БД с увеличенным timeout для конкурентного доступа
             self.logger.debug(f"Подключение к базе данных: {self.db_path}")
-            conn = sqlite3.connect(self.db_path, timeout=10.0)
+            conn = sqlite3.connect(self.db_path, timeout=20.0)
             conn.row_factory = sqlite3.Row
             self.logger.debug("Подключение к базе данных установлено")
         except sqlite3.OperationalError as e:
+            error_str = str(e).lower()
+            # Проверяем, является ли это временной блокировкой
+            if 'locked' in error_str or 'database is locked' in error_str:
+                # Временная блокировка - пробрасываем как есть для retry
+                self.logger.debug(f"Временная блокировка БД: {e}")
+                raise
+            # Постоянная ошибка (например, unable to open database file)
             error_msg = (
                 f"Не удалось открыть базу данных {self.db_path}: {e}. "
                 f"Проверьте права доступа к файлу и директории {db_dir if db_dir else 'текущей'}. "
@@ -150,6 +215,7 @@ class DatabaseManager:
             conn.commit()
             self.logger.info("База данных инициализирована")
     
+    @retry_db_operation(max_retries=3, delay=0.1, backoff=2.0)
     def is_order_processed(self, order_uid: str) -> bool:
         """
         Проверяет, был ли заказ уже обработан
@@ -168,6 +234,7 @@ class DatabaseManager:
             )
             return cursor.fetchone() is not None
     
+    @retry_db_operation(max_retries=3, delay=0.1, backoff=2.0)
     def mark_order_as_processed(self, order_uid: str, order_id: int, created_at: str) -> None:
         """
         Помечает заказ как обработанный
