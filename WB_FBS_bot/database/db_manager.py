@@ -20,6 +20,7 @@ class DatabaseManager:
         """
         self.logger = logging.getLogger(__name__)
         # Нормализуем путь: делаем абсолютным и создаем директорию, если нужно
+        self.logger.debug(f"Исходный путь к БД: {db_path} (абсолютный: {os.path.isabs(db_path)})")
         self.db_path = self._normalize_db_path(db_path)
         self.logger.info(f"Используется база данных: {self.db_path}")
         self._init_database()
@@ -34,19 +35,27 @@ class DatabaseManager:
         Returns:
             str: Абсолютный путь к БД
         """
-        # Если путь уже абсолютный, используем его
+        # Если путь уже абсолютный, используем его как есть
         if os.path.isabs(db_path):
             abs_path = db_path
         else:
-            # Делаем путь абсолютным относительно текущей рабочей директории
-            abs_path = os.path.abspath(db_path)
+            # Определяем директорию проекта относительно расположения этого файла
+            # Структура: WB_FBS_bot/database/db_manager.py -> проект на 2 уровня выше
+            current_file = os.path.abspath(__file__)
+            project_dir = os.path.dirname(os.path.dirname(current_file))
+            # Делаем путь абсолютным относительно директории проекта
+            abs_path = os.path.join(project_dir, db_path)
+            # Нормализуем путь (убираем .., . и т.д.)
+            abs_path = os.path.normpath(abs_path)
         
         # Получаем директорию для файла БД
         db_dir = os.path.dirname(abs_path)
         
-        # Если директория пустая (файл в корне), используем текущую директорию
+        # Если директория пустая (файл в корне), используем директорию проекта
         if not db_dir:
-            db_dir = os.getcwd()
+            current_file = os.path.abspath(__file__)
+            project_dir = os.path.dirname(os.path.dirname(current_file))
+            db_dir = project_dir
             abs_path = os.path.join(db_dir, os.path.basename(db_path))
         
         # Создаем директорию, если её нет
@@ -65,6 +74,7 @@ class DatabaseManager:
                 self.logger.error(error_msg)
                 raise PermissionError(error_msg)
         
+        self.logger.debug(f"Нормализованный путь к БД: {abs_path}, директория: {db_dir}")
         return abs_path
     
     @contextmanager
