@@ -52,8 +52,6 @@ class OrderMonitor:
         self._initialize_chat_id()
         
         self.is_running = False
-        self.last_daily_report_date = None  # Дата последнего отчета
-        self.last_views_report_date = None  # Дата последнего отчета о просмотрах
         self._report_sending_lock = False  # Блокировка для предотвращения параллельной отправки
     
     def _initialize_chat_id(self) -> None:
@@ -134,9 +132,11 @@ class OrderMonitor:
                         time.sleep(sleep_interval)
                         total_slept += sleep_interval
                         
-                        # Проверяем ежедневный отчет каждые 10 секунд
+                        # Проверяем ежедневный отчет каждые 2 секунды в первые 10 секунд каждого часа
                         # чтобы не пропустить момент 00:00 или 05:00, но не слишком часто
-                        if total_slept - last_report_check >= 10:
+                        current_check_time = datetime.now(MSK_TIMEZONE)
+                        check_interval = 2 if (current_check_time.hour in [0, 5] and current_check_time.minute == 0 and current_check_time.second < 10) else 10
+                        if total_slept - last_report_check >= check_interval:
                             self._check_and_send_daily_report()
                             last_report_check = total_slept
                     
@@ -245,20 +245,27 @@ class OrderMonitor:
         # Используем московское время (UTC+3)
         now = datetime.now(MSK_TIMEZONE)
         current_date = now.date()
+        current_date_str = current_date.strftime('%Y-%m-%d')
         
         # Блокировка для предотвращения параллельной отправки
         if self._report_sending_lock:
             return
         
-        # Отчет о заказах в 00:00 (московское время) - только в начале минуты (первые 30 секунд)
-        if now.hour == 0 and now.minute == 0 and now.second < 30:
-            # Отправляем отчет только один раз за день
-            if self.last_daily_report_date != current_date:
+        # Отчет о заказах в 00:00 (московское время) - только первые 5 секунд
+        if now.hour == 0 and now.minute == 0 and now.second < 5:
+            # Атомарно проверяем и устанавливаем дату в БД (только если еще не установлена)
+            if self.db_manager.set_setting_if_not_exists("last_daily_report_date", current_date_str):
+                # Дата была установлена - значит отчет еще не отправлялся сегодня
+                # Проверяем блокировку перед установкой
+                if self._report_sending_lock:
+                    # Если блокировка уже установлена, удаляем дату и выходим
+                    # (другой процесс уже обрабатывает отчет)
+                    self.db_manager.set_setting("last_daily_report_date", "")
+                    return
+                
                 # Устанавливаем блокировку СРАЗУ
                 self._report_sending_lock = True
                 try:
-                    # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
-                    self.last_daily_report_date = current_date
                     
                     # Получаем статистику за вчерашний день
                     yesterday = current_date - timedelta(days=1)
@@ -277,28 +284,29 @@ class OrderMonitor:
                     # Снимаем блокировку после отправки
                     self._report_sending_lock = False
         
-        # Отчет о просмотрах карточек в 05:00 (московское время) - только в начале минуты (первые 30 секунд)
-        if now.hour == 5 and now.minute == 0 and now.second < 30:
+        # Отчет о просмотрах карточек в 05:00 (московское время) - только первые 5 секунд
+        if now.hour == 5 and now.minute == 0 and now.second < 5:
             # Проверяем, что analytics_client инициализирован
             if not self.analytics_client:
-                if self.last_views_report_date != current_date:
-                    # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
-                    self.last_views_report_date = current_date
-                    self.logger.warning("Analytics API клиент не инициализирован. Отчет о просмотрах не будет отправлен.")
+                # Атомарно проверяем и устанавливаем дату в БД (только если еще не установлена)
+                self.db_manager.set_setting_if_not_exists("last_views_report_date", current_date_str)
+                self.logger.warning("Analytics API клиент не инициализирован. Отчет о просмотрах не будет отправлен.")
                 return
             
-            # Отправляем отчет только один раз за день
-            if self.last_views_report_date != current_date:
-                # Устанавливаем блокировку СРАЗУ
+            # Атомарно проверяем и устанавливаем дату в БД (только если еще не установлена)
+            if self.db_manager.set_setting_if_not_exists("last_views_report_date", current_date_str):
+                # Дата была установлена - значит отчет еще не отправлялся сегодня
+                # Проверяем блокировку перед установкой
                 if self._report_sending_lock:
+                    # Если блокировка уже установлена, удаляем дату и выходим
+                    # (другой процесс уже обрабатывает отчет)
+                    self.db_manager.set_setting("last_views_report_date", "")
                     return
                 
                 self._report_sending_lock = True
                 try:
-                    # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
-                    self.last_views_report_date = current_date
                     
-                    self.logger.info(f"Время для отправки отчета о просмотрах! Дата: {current_date}")
+                    self.logger.info(f"Время для отправки отчета о просмотрах! Дата: {current_date_str}")
                     sys.stdout.flush()
                     # Получаем статистику просмотров за вчерашний день
                     yesterday = current_date - timedelta(days=1)
@@ -413,15 +421,17 @@ class OrderMonitor:
                     sys.stdout.flush()
                     
                     # Дата уже обновлена в начале блока, здесь только логируем
-                    self.logger.debug(f"Дата последнего отчета о просмотрах: {self.last_views_report_date}")
+                    self.logger.debug(f"Дата последнего отчета о просмотрах: {current_date_str}")
                 except Exception as e:
                     # Обработка ошибок на верхнем уровне
                     self.logger.error(f"Критическая ошибка при обработке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
                     sys.stderr.flush()
-                    # Сбрасываем дату только если еще в окне времени (первые 30 секунд)
-                    if now.hour == 5 and now.minute == 0 and now.second < 30:
-                        self.last_views_report_date = None
+                    # Сбрасываем дату только если еще в окне времени (первые 5 секунд)
+                    # чтобы можно было повторить попытку
+                    if now.hour == 5 and now.minute == 0 and now.second < 5:
+                        # Удаляем дату из БД для повторной попытки
+                        self.db_manager.set_setting("last_views_report_date", "")
                 finally:
                     # Снимаем блокировку после отправки
                     self._report_sending_lock = False

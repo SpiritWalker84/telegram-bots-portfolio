@@ -331,6 +331,34 @@ class DatabaseManager:
             conn.commit()
             self.logger.debug(f"Настройка {key} сохранена")
     
+    @retry_db_operation(max_retries=3, delay=0.1, backoff=2.0)
+    def set_setting_if_not_exists(self, key: str, value: str) -> bool:
+        """
+        Атомарно устанавливает значение настройки в БД только если его еще нет
+        
+        Args:
+            key: Ключ настройки
+            value: Значение настройки
+            
+        Returns:
+            bool: True если значение было установлено, False если уже существовало
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # Пытаемся вставить, если ключа еще нет
+                cursor.execute("""
+                    INSERT INTO bot_settings (key, value)
+                    VALUES (?, ?)
+                """, (key, value))
+                conn.commit()
+                self.logger.debug(f"Настройка {key} установлена (не существовала)")
+                return True
+        except sqlite3.IntegrityError:
+            # Ключ уже существует - это нормально
+            self.logger.debug(f"Настройка {key} уже существует")
+            return False
+    
     def get_orders_count_for_date(self, date: str) -> int:
         """
         Возвращает количество заказов, обработанных за указанную дату
