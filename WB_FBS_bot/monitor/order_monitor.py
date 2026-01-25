@@ -388,45 +388,45 @@ class OrderMonitor:
                 total_batches = (len(nm_ids) + batch_size - 1) // batch_size
                 
                 if len(nm_ids) > batch_size:
-                        self.logger.warning(f"Товаров: {len(nm_ids)}, делаем запросы батчами по {batch_size} (всего {total_batches} батчей)")
-                        all_views_stats = {}
+                    self.logger.warning(f"Товаров: {len(nm_ids)}, делаем запросы батчами по {batch_size} (всего {total_batches} батчей)")
+                    all_views_stats = {}
+                    
+                    for i in range(0, len(nm_ids), batch_size):
+                        batch_nm_ids = nm_ids[i:i+batch_size]
+                        batch_num = (i // batch_size) + 1
                         
-                        for i in range(0, len(nm_ids), batch_size):
-                            batch_nm_ids = nm_ids[i:i+batch_size]
-                            batch_num = (i // batch_size) + 1
+                        # Увеличиваем задержку между батчами для избежания rate limiting
+                        if i >= batch_size:
+                            delay = 10  # Увеличено с 5 до 10 секунд
+                            self.logger.warning(f"Задержка {delay} секунд перед батчем {batch_num}...")
+                            time.sleep(delay)
+                        
+                        try:
+                            self.logger.warning(f"Запрос батча {batch_num}/{total_batches} ({len(batch_nm_ids)} товаров)...")
+                            batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
                             
-                            # Увеличиваем задержку между батчами для избежания rate limiting
-                            if i >= batch_size:
-                                delay = 10  # Увеличено с 5 до 10 секунд
-                                self.logger.warning(f"Задержка {delay} секунд перед батчем {batch_num}...")
-                                time.sleep(delay)
-                            
-                            try:
-                                self.logger.warning(f"Запрос батча {batch_num}/{total_batches} ({len(batch_nm_ids)} товаров)...")
-                                batch_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=batch_nm_ids)
-                                
-                                # Объединяем результаты батча
-                                for key, value in batch_stats.items():
-                                    if key.startswith("nmId_"):
-                                        nm_id = int(key.replace("nmId_", ""))
-                                        vendor_code = nm_to_vendor.get(nm_id)
-                                        if vendor_code:
-                                            all_views_stats[vendor_code] = all_views_stats.get(vendor_code, 0) + value
-                                        else:
-                                            all_views_stats[key] = all_views_stats.get(key, 0) + value
+                            # Объединяем результаты батча
+                            for key, value in batch_stats.items():
+                                if key.startswith("nmId_"):
+                                    nm_id = int(key.replace("nmId_", ""))
+                                    vendor_code = nm_to_vendor.get(nm_id)
+                                    if vendor_code:
+                                        all_views_stats[vendor_code] = all_views_stats.get(vendor_code, 0) + value
                                     else:
                                         all_views_stats[key] = all_views_stats.get(key, 0) + value
-                                
-                                # Логируем прогресс
-                                total_views_found = sum(all_views_stats.values())
-                                batch_views = sum(batch_stats.values())
-                                if batch_views > 0:
-                                    self.logger.warning(f"В батче {batch_num} найдено: {batch_views} просмотров (всего: {total_views_found})")
-                            except Exception as batch_error:
-                                self.logger.error(f"Ошибка при обработке батча {batch_num}: {batch_error}")
-                                # Продолжаем со следующим батчем
-                                continue
-                        
+                                else:
+                                    all_views_stats[key] = all_views_stats.get(key, 0) + value
+                            
+                            # Логируем прогресс
+                            total_views_found = sum(all_views_stats.values())
+                            batch_views = sum(batch_stats.values())
+                            if batch_views > 0:
+                                self.logger.warning(f"В батче {batch_num} найдено: {batch_views} просмотров (всего: {total_views_found})")
+                        except Exception as batch_error:
+                            self.logger.error(f"Ошибка при обработке батча {batch_num}: {batch_error}")
+                            # Продолжаем со следующим батчем
+                            continue
+                    
                     views_stats = all_views_stats
                 else:
                     views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=nm_ids)
