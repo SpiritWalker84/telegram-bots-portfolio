@@ -119,8 +119,7 @@ class OrderMonitor:
                     sys.stdout.flush()  # Принудительный flush для демона
                     
                     # Защита от зависания: используем sleep с проверкой is_running
-                    # Проверяем время для ежедневного отчета каждые 10 секунд
-                    # чтобы не пропустить момент 00:00 или 05:00, но не слишком часто
+                    # Проверяем время для ежедневного отчета только в нужные моменты
                     sleep_interval = 1  # Проверяем каждую секунду
                     total_slept = 0
                     last_report_check = 0  # Время последней проверки отчета (в секундах)
@@ -132,11 +131,20 @@ class OrderMonitor:
                         time.sleep(sleep_interval)
                         total_slept += sleep_interval
                         
-                        # Проверяем ежедневный отчет каждые 2 секунды в первые 10 секунд каждого часа
-                        # чтобы не пропустить момент 00:00 или 05:00, но не слишком часто
+                        # Проверяем ежедневный отчет только в критические моменты:
+                        # - каждую секунду в первые 10 секунд часов 00:00 и 05:00
+                        # - каждые 30 секунд в остальное время
                         current_check_time = datetime.now(MSK_TIMEZONE)
-                        check_interval = 2 if (current_check_time.hour in [0, 5] and current_check_time.minute == 0 and current_check_time.second < 10) else 10
-                        if total_slept - last_report_check >= check_interval:
+                        should_check = False
+                        
+                        if (current_check_time.hour in [0, 5] and current_check_time.minute == 0 and current_check_time.second < 10):
+                            # В критическое время проверяем каждую секунду
+                            should_check = True
+                        elif total_slept - last_report_check >= 30:
+                            # В остальное время проверяем каждые 30 секунд
+                            should_check = True
+                        
+                        if should_check:
                             self._check_and_send_daily_report()
                             last_report_check = total_slept
                     
@@ -246,81 +254,107 @@ class OrderMonitor:
         now = datetime.now(MSK_TIMEZONE)
         current_date = now.date()
         current_date_str = current_date.strftime('%Y-%m-%d')
+        current_time_str = now.strftime('%H:%M:%S')
+        current_hour = now.hour
+        current_minute = now.minute
+        current_second = now.second
         
         # Блокировка для предотвращения параллельной отправки
         if self._report_sending_lock:
+            self.logger.debug(f"Блокировка активна, пропускаем проверку отчетов. Время: {current_time_str}")
             return
         
-        # Отчет о заказах в 00:00 (московское время) - только первые 5 секунд
-        if now.hour == 0 and now.minute == 0 and now.second < 5:
-            # Атомарно проверяем и устанавливаем дату в БД (только если еще не установлена)
-            if self.db_manager.set_setting_if_not_exists("last_daily_report_date", current_date_str):
-                # Дата была установлена - значит отчет еще не отправлялся сегодня
-                # Проверяем блокировку перед установкой
-                if self._report_sending_lock:
-                    # Если блокировка уже установлена, удаляем дату и выходим
-                    # (другой процесс уже обрабатывает отчет)
-                    self.db_manager.set_setting("last_daily_report_date", "")
-                    return
-                
-                # Устанавливаем блокировку СРАЗУ
-                self._report_sending_lock = True
-                try:
-                    
-                    # Получаем статистику за вчерашний день
-                    yesterday = current_date - timedelta(days=1)
-                    yesterday_str = yesterday.strftime('%Y-%m-%d')
-                    orders_count = self.db_manager.get_orders_count_for_date(yesterday_str)
-                    
-                    # Отправляем статистику с retry-логикой
-                    self.logger.info(f"Отправка ежедневной статистики за {yesterday_str}: {orders_count} заказов")
-                    sys.stdout.flush()
-                    if self.telegram_bot.send_daily_statistics(orders_count, yesterday_str):
-                        self.logger.info("Ежедневная статистика успешно отправлена")
-                    else:
-                        self.logger.warning("Не удалось отправить ежедневную статистику")
-                    sys.stdout.flush()
-                finally:
-                    # Снимаем блокировку после отправки
-                    self._report_sending_lock = False
+        # Логируем только если мы близко к времени отправки (для отладки)
+        if (current_hour == 0 and current_minute == 0) or (current_hour == 5 and current_minute == 0):
+            self.logger.debug(f"Проверка времени для отчетов. Время: {current_time_str}, час={current_hour}, мин={current_minute}, сек={current_second}")
         
-        # Отчет о просмотрах карточек в 05:00 (московское время) - только первые 5 секунд
-        if now.hour == 5 and now.minute == 0 and now.second < 5:
+        # СТРОГАЯ проверка: отчет о заказах ТОЛЬКО в 00:00:00-00:00:05 (московское время)
+        if now.hour == 0 and now.minute == 0 and 0 <= now.second < 5:
+            # Проверяем в БД, был ли уже отправлен отчет за сегодня
+            last_report_date = self.db_manager.get_setting("last_daily_report_date")
+            if last_report_date == current_date_str:
+                # Отчет уже был отправлен сегодня - выходим
+                self.logger.debug(f"Отчет о заказах уже отправлен сегодня ({current_date_str}). Время: {current_time_str}")
+                return
+            
+            # Атомарно проверяем и устанавливаем дату в БД (только если еще не установлена)
+            if not self.db_manager.set_setting_if_not_exists("last_daily_report_date", current_date_str):
+                # Дата уже была установлена другим процессом - выходим
+                self.logger.debug(f"Другой процесс уже обрабатывает отчет о заказах. Время: {current_time_str}")
+                return
+            
+            # Устанавливаем блокировку СРАЗУ
+            self._report_sending_lock = True
+            try:
+                self.logger.info(f"Начало отправки ежедневной статистики заказов. Время: {current_time_str}")
+                sys.stdout.flush()
+                
+                # Получаем статистику за вчерашний день
+                yesterday = current_date - timedelta(days=1)
+                yesterday_str = yesterday.strftime('%Y-%m-%d')
+                orders_count = self.db_manager.get_orders_count_for_date(yesterday_str)
+                
+                # Отправляем статистику с retry-логикой
+                self.logger.info(f"Отправка ежедневной статистики за {yesterday_str}: {orders_count} заказов")
+                sys.stdout.flush()
+                if self.telegram_bot.send_daily_statistics(orders_count, yesterday_str):
+                    self.logger.info("Ежедневная статистика успешно отправлена")
+                else:
+                    self.logger.warning("Не удалось отправить ежедневную статистику")
+                    # При ошибке отправки удаляем дату, чтобы можно было повторить
+                    self.db_manager.set_setting("last_daily_report_date", "")
+                sys.stdout.flush()
+            except Exception as e:
+                self.logger.error(f"Ошибка при отправке ежедневной статистики: {e}", exc_info=True)
+                # При ошибке удаляем дату, чтобы можно было повторить
+                self.db_manager.set_setting("last_daily_report_date", "")
+                sys.stdout.flush()
+                sys.stderr.flush()
+            finally:
+                # Снимаем блокировку после отправки
+                self._report_sending_lock = False
+        
+        # СТРОГАЯ проверка: отчет о просмотрах ТОЛЬКО в 05:00:00-05:00:05 (московское время)
+        elif now.hour == 5 and now.minute == 0 and 0 <= now.second < 5:
+            # Проверяем в БД, был ли уже отправлен отчет за сегодня
+            last_views_report_date = self.db_manager.get_setting("last_views_report_date")
+            if last_views_report_date == current_date_str:
+                # Отчет уже был отправлен сегодня - выходим
+                self.logger.debug(f"Отчет о просмотрах уже отправлен сегодня ({current_date_str}). Время: {current_time_str}")
+                return
+            
             # Проверяем, что analytics_client инициализирован
             if not self.analytics_client:
-                # Атомарно проверяем и устанавливаем дату в БД (только если еще не установлена)
-                self.db_manager.set_setting_if_not_exists("last_views_report_date", current_date_str)
+                # Сохраняем дату, чтобы не пытаться снова
+                self.db_manager.set_setting("last_views_report_date", current_date_str)
                 self.logger.warning("Analytics API клиент не инициализирован. Отчет о просмотрах не будет отправлен.")
                 return
             
             # Атомарно проверяем и устанавливаем дату в БД (только если еще не установлена)
-            if self.db_manager.set_setting_if_not_exists("last_views_report_date", current_date_str):
-                # Дата была установлена - значит отчет еще не отправлялся сегодня
-                # Проверяем блокировку перед установкой
-                if self._report_sending_lock:
-                    # Если блокировка уже установлена, удаляем дату и выходим
-                    # (другой процесс уже обрабатывает отчет)
-                    self.db_manager.set_setting("last_views_report_date", "")
-                    return
+            if not self.db_manager.set_setting_if_not_exists("last_views_report_date", current_date_str):
+                # Дата уже была установлена другим процессом - выходим
+                self.logger.debug(f"Другой процесс уже обрабатывает отчет о просмотрах. Время: {current_time_str}")
+                return
+            
+            # Устанавливаем блокировку СРАЗУ
+            self._report_sending_lock = True
+            try:
+                self.logger.info(f"Начало отправки отчета о просмотрах. Дата: {current_date_str}, Время: {current_time_str}")
+                sys.stdout.flush()
                 
-                self._report_sending_lock = True
-                try:
-                    
-                    self.logger.info(f"Время для отправки отчета о просмотрах! Дата: {current_date_str}")
-                    sys.stdout.flush()
-                    # Получаем статистику просмотров за вчерашний день
-                    yesterday = current_date - timedelta(days=1)
-                    yesterday_str = yesterday.strftime('%Y-%m-%d')
-                    
-                    self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
-                    sys.stdout.flush()
-                    
-                    # Получаем список товаров для запроса (API требует nmIds, до 20 за раз)
-                    nm_ids = None
-                    nm_to_vendor = {}
-                    content_api_failed = False
-                    
-                    if self.content_client:
+                # Получаем статистику просмотров за вчерашний день
+                yesterday = current_date - timedelta(days=1)
+                yesterday_str = yesterday.strftime('%Y-%m-%d')
+                
+                self.logger.info(f"Получение статистики просмотров за {yesterday_str}")
+                sys.stdout.flush()
+                
+                # Получаем список товаров для запроса (API требует nmIds, до 20 за раз)
+                nm_ids = None
+                nm_to_vendor = {}
+                content_api_failed = False
+                
+                if self.content_client:
                         try:
                             self.logger.warning("Получение списка товаров для запроса статистики...")
                             cards = self.content_client.get_all_cards()
@@ -345,16 +379,15 @@ class OrderMonitor:
                         # Выходим из внутреннего try, но дата уже обновлена
                         raise Exception("Content API клиент не инициализирован")
                     
-                    if not nm_ids or len(nm_ids) == 0:
-                        self.logger.warning(f"Список товаров пуст, отчет не может быть сформирован")
-                        # Выходим из внутреннего try, но дата уже обновлена
-                        raise Exception("Список товаров пуст")
-                    
-                    # Если товаров больше 20, делаем несколько запросов батчами
-                    batch_size = 20
-                    total_batches = (len(nm_ids) + batch_size - 1) // batch_size
-                    
-                    if len(nm_ids) > batch_size:
+                if not nm_ids or len(nm_ids) == 0:
+                    self.logger.warning(f"Список товаров пуст, отчет не может быть сформирован")
+                    raise Exception("Список товаров пуст")
+                
+                # Если товаров больше 20, делаем несколько запросов батчами
+                batch_size = 20
+                total_batches = (len(nm_ids) + batch_size - 1) // batch_size
+                
+                if len(nm_ids) > batch_size:
                         self.logger.warning(f"Товаров: {len(nm_ids)}, делаем запросы батчами по {batch_size} (всего {total_batches} батчей)")
                         all_views_stats = {}
                         
@@ -394,47 +427,52 @@ class OrderMonitor:
                                 # Продолжаем со следующим батчем
                                 continue
                         
-                        views_stats = all_views_stats
-                    else:
-                        views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=nm_ids)
-                        
-                        # Заменяем nmId_* на vendorCode
-                        final_stats = {}
-                        for key, value in views_stats.items():
-                            if key.startswith("nmId_"):
-                                nm_id = int(key.replace("nmId_", ""))
-                                vendor_code = nm_to_vendor.get(nm_id, key)
-                                final_stats[vendor_code] = value
-                            else:
-                                final_stats[key] = value
-                        views_stats = final_stats
+                    views_stats = all_views_stats
+                else:
+                    views_stats = self.analytics_client.get_product_views_detailed_for_date(yesterday_str, nm_ids=nm_ids)
                     
-                    if views_stats:
-                        self.logger.warning(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")
-                        sys.stdout.flush()
-                        if self.telegram_bot.send_product_views_report(views_stats, yesterday_str):
-                            self.logger.warning("Отчет о просмотрах успешно отправлен")
+                    # Заменяем nmId_* на vendorCode
+                    final_stats = {}
+                    for key, value in views_stats.items():
+                        if key.startswith("nmId_"):
+                            nm_id = int(key.replace("nmId_", ""))
+                            vendor_code = nm_to_vendor.get(nm_id, key)
+                            final_stats[vendor_code] = value
                         else:
-                            self.logger.error("Не удалось отправить отчет о просмотрах")
-                    else:
-                        self.logger.warning(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
+                            final_stats[key] = value
+                    views_stats = final_stats
+                
+                if views_stats:
+                    self.logger.warning(f"Отправка отчета о просмотрах за {yesterday_str}: {len(views_stats)} карточек")
                     sys.stdout.flush()
-                    
-                    # Дата уже обновлена в начале блока, здесь только логируем
-                    self.logger.debug(f"Дата последнего отчета о просмотрах: {current_date_str}")
+                    if self.telegram_bot.send_product_views_report(views_stats, yesterday_str):
+                        self.logger.warning("Отчет о просмотрах успешно отправлен")
+                    else:
+                        self.logger.error("Не удалось отправить отчет о просмотрах")
+                        # При ошибке отправки удаляем дату, чтобы можно было повторить
+                        self.db_manager.set_setting("last_views_report_date", "")
+                else:
+                    self.logger.warning(f"Нет просмотров за {yesterday_str}, отчет не отправляется")
+                sys.stdout.flush()
+                
+                # Дата уже обновлена в начале блока, здесь только логируем
+                self.logger.debug(f"Дата последнего отчета о просмотрах: {current_date_str}")
                 except Exception as e:
                     # Обработка ошибок на верхнем уровне
                     self.logger.error(f"Критическая ошибка при обработке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
                     sys.stderr.flush()
-                    # Сбрасываем дату только если еще в окне времени (первые 5 секунд)
-                    # чтобы можно было повторить попытку
-                    if now.hour == 5 and now.minute == 0 and now.second < 5:
-                        # Удаляем дату из БД для повторной попытки
-                        self.db_manager.set_setting("last_views_report_date", "")
+                    # При ошибке удаляем дату, чтобы можно было повторить попытку
+                    self.db_manager.set_setting("last_views_report_date", "")
                 finally:
                     # Снимаем блокировку после отправки
                     self._report_sending_lock = False
+        else:
+            # Не время для отправки отчетов - выходим без действий
+            # Логируем только если мы близко к времени отправки (для отладки)
+            if (now.hour == 0 and now.minute == 0) or (now.hour == 5 and now.minute == 0):
+                if now.second >= 5:
+                    self.logger.debug(f"Время для отчетов прошло. Текущее время: {current_time_str}")
     
     def get_statistics(self) -> dict:
         """
