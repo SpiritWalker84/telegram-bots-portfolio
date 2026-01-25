@@ -355,29 +355,29 @@ class OrderMonitor:
                 content_api_failed = False
                 
                 if self.content_client:
-                        try:
-                            self.logger.warning("Получение списка товаров для запроса статистики...")
-                            cards = self.content_client.get_all_cards()
-                            nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
-                            self.logger.warning(f"Получено {len(nm_ids)} nmIds")
-                            
-                            # Создаем маппинг nmId -> vendorCode для замены в отчете
-                            nm_to_vendor = {card.get("nmID"): card.get("vendorCode", "").strip() 
-                                          for card in cards if card.get("nmID") and card.get("vendorCode")}
-                        except Exception as e:
-                            self.logger.error(f"Не удалось получить список товаров через Content API: {e}")
-                            content_api_failed = True
-                            # Пробуем использовать кеш или пропускаем отчет
-                            if not nm_ids:
-                                self.logger.error("Невозможно получить отчет без списка товаров. Отправляем уведомление об ошибке.")
-                                self.telegram_bot.send_message(f"⚠️ Ошибка при получении отчета о просмотрах за {yesterday_str}: не удалось получить список товаров через Content API. Ошибка: {str(e)[:200]}")
-                                # Выходим из внутреннего try, но дата уже обновлена
-                                raise  # Пробрасываем ошибку наверх
-                    else:
-                        self.logger.error("Content API клиент не инициализирован, невозможно получить список товаров")
-                        self.telegram_bot.send_message(f"⚠️ Ошибка: Content API клиент не инициализирован. Отчет о просмотрах за {yesterday_str} не может быть получен.")
-                        # Выходим из внутреннего try, но дата уже обновлена
-                        raise Exception("Content API клиент не инициализирован")
+                    try:
+                        self.logger.warning("Получение списка товаров для запроса статистики...")
+                        cards = self.content_client.get_all_cards()
+                        nm_ids = [card.get("nmID") for card in cards if card.get("nmID")]
+                        self.logger.warning(f"Получено {len(nm_ids)} nmIds")
+                        
+                        # Создаем маппинг nmId -> vendorCode для замены в отчете
+                        nm_to_vendor = {card.get("nmID"): card.get("vendorCode", "").strip() 
+                                      for card in cards if card.get("nmID") and card.get("vendorCode")}
+                    except Exception as e:
+                        self.logger.error(f"Не удалось получить список товаров через Content API: {e}")
+                        content_api_failed = True
+                        # Пробуем использовать кеш или пропускаем отчет
+                        if not nm_ids:
+                            self.logger.error("Невозможно получить отчет без списка товаров. Отправляем уведомление об ошибке.")
+                            self.telegram_bot.send_message(f"⚠️ Ошибка при получении отчета о просмотрах за {yesterday_str}: не удалось получить список товаров через Content API. Ошибка: {str(e)[:200]}")
+                            # Выходим из внутреннего try, но дата уже обновлена
+                            raise  # Пробрасываем ошибку наверх
+                else:
+                    self.logger.error("Content API клиент не инициализирован, невозможно получить список товаров")
+                    self.telegram_bot.send_message(f"⚠️ Ошибка: Content API клиент не инициализирован. Отчет о просмотрах за {yesterday_str} не может быть получен.")
+                    # Выходим из внутреннего try, но дата уже обновлена
+                    raise Exception("Content API клиент не инициализирован")
                     
                 if not nm_ids or len(nm_ids) == 0:
                     self.logger.warning(f"Список товаров пуст, отчет не может быть сформирован")
