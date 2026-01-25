@@ -457,16 +457,16 @@ class OrderMonitor:
                 
                 # Дата уже обновлена в начале блока, здесь только логируем
                 self.logger.debug(f"Дата последнего отчета о просмотрах: {current_date_str}")
-                except Exception as e:
-                    # Обработка ошибок на верхнем уровне
-                    self.logger.error(f"Критическая ошибка при обработке отчета о просмотрах: {e}", exc_info=True)
-                    sys.stdout.flush()
-                    sys.stderr.flush()
-                    # При ошибке удаляем дату, чтобы можно было повторить попытку
-                    self.db_manager.set_setting("last_views_report_date", "")
-                finally:
-                    # Снимаем блокировку после отправки
-                    self._report_sending_lock = False
+            except Exception as e:
+                # Обработка ошибок на верхнем уровне
+                self.logger.error(f"Критическая ошибка при обработке отчета о просмотрах: {e}", exc_info=True)
+                sys.stdout.flush()
+                sys.stderr.flush()
+                # При ошибке удаляем дату, чтобы можно было повторить попытку
+                self.db_manager.set_setting("last_views_report_date", "")
+            finally:
+                # Снимаем блокировку после отправки
+                self._report_sending_lock = False
         else:
             # Не время для отправки отчетов - выходим без действий
             # Логируем только если мы близко к времени отправки (для отладки)
