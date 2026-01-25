@@ -102,7 +102,6 @@ class OrderMonitor:
             while self.is_running:
                 try:
                     self._process_orders()
-                    self._check_and_send_daily_report()
                     
                     # Сбрасываем счетчик ошибок при успешной итерации
                     consecutive_errors = 0
@@ -122,7 +121,8 @@ class OrderMonitor:
                     sys.stdout.flush()  # Принудительный flush для демона
                     
                     # Защита от зависания: используем sleep с проверкой is_running
-                    # Также проверяем время для ежедневного отчета каждую минуту
+                    # Проверяем время для ежедневного отчета каждые 10 секунд
+                    # чтобы не пропустить момент 00:00 или 05:00, но не слишком часто
                     sleep_interval = 1  # Проверяем каждую секунду
                     total_slept = 0
                     last_report_check = 0  # Время последней проверки отчета (в секундах)
@@ -134,9 +134,9 @@ class OrderMonitor:
                         time.sleep(sleep_interval)
                         total_slept += sleep_interval
                         
-                        # Проверяем ежедневный отчет каждую минуту (60 секунд)
-                        # чтобы не пропустить момент 00:00 или 05:00
-                        if total_slept - last_report_check >= 60:
+                        # Проверяем ежедневный отчет каждые 10 секунд
+                        # чтобы не пропустить момент 00:00 или 05:00, но не слишком часто
+                        if total_slept - last_report_check >= 10:
                             self._check_and_send_daily_report()
                             last_report_check = total_slept
                     
@@ -250,13 +250,8 @@ class OrderMonitor:
         if self._report_sending_lock:
             return
         
-        # Логируем проверку времени, если мы в окнах отчетов (для отладки)
-        if (now.hour == 0 and now.minute <= 5) or (now.hour == 5 and now.minute <= 5):
-            self.logger.debug(f"Проверка времени отчета: {now.hour:02d}:{now.minute:02d} MSK, дата: {current_date}")
-        
-        # Отчет о заказах в 00:00-00:05 (московское время)
-        if now.hour == 0 and now.minute <= 5:
-            self.logger.debug(f"Проверка времени для отчета о заказах: {now.hour}:{now.minute:02d} MSK")
+        # Отчет о заказах в 00:00 (московское время) - только в начале минуты (первые 30 секунд)
+        if now.hour == 0 and now.minute == 0 and now.second < 30:
             # Отправляем отчет только один раз за день
             if self.last_daily_report_date != current_date:
                 # Устанавливаем блокировку СРАЗУ
@@ -282,11 +277,8 @@ class OrderMonitor:
                     # Снимаем блокировку после отправки
                     self._report_sending_lock = False
         
-        # Отчет о просмотрах карточек в 05:00-05:05 (московское время)
-        if now.hour == 5 and now.minute <= 5:
-            self.logger.debug(f"Проверка времени для отчета о просмотрах: {now.hour}:{now.minute:02d} MSK, last_report_date: {self.last_views_report_date}, current_date: {current_date}")
-            sys.stdout.flush()
-            
+        # Отчет о просмотрах карточек в 05:00 (московское время) - только в начале минуты (первые 30 секунд)
+        if now.hour == 5 and now.minute == 0 and now.second < 30:
             # Проверяем, что analytics_client инициализирован
             if not self.analytics_client:
                 if self.last_views_report_date != current_date:
@@ -306,7 +298,7 @@ class OrderMonitor:
                     # Обновляем дату СРАЗУ, чтобы избежать дублирования при параллельных вызовах
                     self.last_views_report_date = current_date
                     
-                    self.logger.info(f"Время для отправки отчета о просмотрах! last_report_date: {self.last_views_report_date}, current_date: {current_date}")
+                    self.logger.info(f"Время для отправки отчета о просмотрах! Дата: {current_date}")
                     sys.stdout.flush()
                     # Получаем статистику просмотров за вчерашний день
                     yesterday = current_date - timedelta(days=1)
@@ -427,8 +419,8 @@ class OrderMonitor:
                     self.logger.error(f"Критическая ошибка при обработке отчета о просмотрах: {e}", exc_info=True)
                     sys.stdout.flush()
                     sys.stderr.flush()
-                    # Сбрасываем дату только если еще в окне времени
-                    if now.hour == 5 and now.minute <= 5:
+                    # Сбрасываем дату только если еще в окне времени (первые 30 секунд)
+                    if now.hour == 5 and now.minute == 0 and now.second < 30:
                         self.last_views_report_date = None
                 finally:
                     # Снимаем блокировку после отправки
