@@ -23,6 +23,7 @@ class TelegramWeatherBot:
         self.default_interval_h = int(os.getenv("DEFAULT_NOTIFICATIONS_INTERVAL_H", "2"))
         self.request_timeout = int(os.getenv("REQUEST_TIMEOUT", "8"))
         self.cache_ttl_min = int(os.getenv("CACHE_TTL_MIN", "10"))
+        self.miniapp_url = (os.getenv("MINIAPP_URL", "").strip() or "https://193.42.127.176:8443").rstrip("/")
 
         if not self.bot_token:
             raise ValueError("BOT_TOKEN не найден. Добавьте токен в .env")
@@ -30,7 +31,11 @@ class TelegramWeatherBot:
             raise ValueError("OW_API_KEY не найден. Добавьте ключ OpenWeather в .env")
 
         self.bot = telebot.TeleBot(self.bot_token, parse_mode="HTML")
-        self.storage = UserStorage("User_Data.json")
+        data_dir = os.getenv("BOT_DATA_DIR", "").strip()
+        if data_dir:
+            os.makedirs(data_dir, exist_ok=True)
+        storage_path = os.path.join(data_dir, "User_Data.json") if data_dir else "User_Data.json"
+        self.storage = UserStorage(storage_path)
         self.weather = WeatherClient(
             api_key=self.ow_api_key,
             timeout=self.request_timeout,
@@ -100,7 +105,7 @@ class TelegramWeatherBot:
         def handle_inline(query: types.InlineQuery) -> None:
             self._handle_inline_query(query)
 
-    def _main_menu_markup(self) -> types.ReplyKeyboardMarkup:
+    def _main_menu_markup(self, with_miniapp: bool = True) -> types.ReplyKeyboardMarkup:
         markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
         buttons = [
             types.KeyboardButton("Текущая погода"),
@@ -111,10 +116,20 @@ class TelegramWeatherBot:
             types.KeyboardButton("Уведомления"),
         ]
         markup.add(*buttons)
+        if with_miniapp and self.miniapp_url:
+            try:
+                markup.add(
+                    types.KeyboardButton("Открыть приложение", web_app=types.WebAppInfo(url=self.miniapp_url))
+                )
+            except Exception:
+                pass
         return markup
 
     def _send_main_menu(self, chat_id: int, text: str) -> None:
-        self.bot.send_message(chat_id, text, reply_markup=self._main_menu_markup())
+        try:
+            self.bot.send_message(chat_id, text, reply_markup=self._main_menu_markup(with_miniapp=True))
+        except Exception:
+            self.bot.send_message(chat_id, text, reply_markup=self._main_menu_markup(with_miniapp=False))
 
     def _handle_text_message(self, message: types.Message) -> None:
         user_id = message.from_user.id

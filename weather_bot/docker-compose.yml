@@ -1,0 +1,50 @@
+# Nginx + API + бот. Запуск: docker compose up -d
+# Нужен .env с BOT_TOKEN, OW_API_KEY (и при желании MINIAPP_URL).
+
+services:
+  api:
+    build: .
+    container_name: vpd04-miniapp-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Europe/Moscow
+    command: gunicorn -w 1 -b 0.0.0.0:5000 miniapp_api:app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  bot:
+    build: .
+    container_name: vpd04-weather-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Europe/Moscow
+      - BOT_DATA_DIR=/app/data
+    volumes:
+      - bot-data:/app/data
+    command: python bot.py
+
+  nginx:
+    image: nginx:alpine
+    container_name: vpd04-miniapp-nginx
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+      - "8443:443"
+    volumes:
+      - ./miniapp-static:/usr/share/nginx/html:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certs:/etc/nginx/certs:ro
+    environment:
+      - TZ=Europe/Moscow
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  bot-data:

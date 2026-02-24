@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Погода — Mini App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="bg-layer" id="bg-layer" aria-hidden="true"></div>
+
+    <main class="app">
+        <header class="header">
+            <h1 class="title">Погода</h1>
+            <form class="search" id="search-form">
+                <input type="text" class="search-input" id="city-input" placeholder="Город" autocomplete="off">
+                <button type="submit" class="search-btn">Найти</button>
+            </form>
+        </header>
+
+        <div class="loading" id="loading">Загрузка...</div>
+        <div class="error" id="error" hidden></div>
+
+        <section class="weather" id="weather" hidden>
+            <div class="city-name" id="city-name"></div>
+
+            <div class="current card">
+                <div class="card-label">Сейчас</div>
+                <div class="current-temp" id="current-temp">—</div>
+                <div class="current-desc" id="current-desc">—</div>
+                <div class="current-details">
+                    <span id="current-feels">Ощущается: —</span>
+                    <span id="current-wind">Ветер: —</span>
+                </div>
+            </div>
+
+            <div class="tomorrow card" id="tomorrow-block">
+                <div class="card-label">Завтра</div>
+                <div class="tomorrow-temps" id="tomorrow-temps">— / —</div>
+                <div class="tomorrow-desc" id="tomorrow-desc">—</div>
+            </div>
+
+            <div class="forecast card">
+                <div class="card-label">Прогноз на 3 дня</div>
+                <div class="forecast-list" id="forecast-list"></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
