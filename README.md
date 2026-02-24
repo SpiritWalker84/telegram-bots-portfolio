@@ -16,13 +16,14 @@
 |-----|------------|------|--------|
 | **Booking Bot** | Бронирование услуг салона красоты<br>Календарь, базы данных, админ-панель | aiogram 3.x • SQLite • FSM • Pydantic | 🟢 **LIVE** [@brooking_bbot](https://t.me/brooking_bbot) |
 | **Reminder Bot** | Напоминания с планировщиком<br>Расписание, уведомления | aiogram 3.x • SQLite • asyncio | 🟢 **LIVE** [@reminderdemo_bot](https://t.me/reminderdemo_bot) |
-| **Weather Bot** | Погода по городу, OpenWeather API<br>Inline-режим, уведомления, качество воздуха | pyTelegramBotAPI • requests • кэш | 🟢 **LIVE** [@spiritweather_bot](https://t.me/spiritweather_bot) |
+| **Weather Bot** | Погода по городу, OpenWeather API<br>Inline-режим, уведомления, качество воздуха | pyTelegramBotAPI • Docker • requests • кэш | 🟢 **LIVE 24/7** [@spiritweather_bot](https://t.me/spiritweather_bot) |
 
 ## 🛠 Стек технологий
 
 - **🐍 Python 3.11+** • **aiogram 3.x** • **asyncio**
 - **🗄️ SQLite3** • **aiosqlite** (асинхронная работа с БД)
 - **⚙️ Pydantic Settings** (конфигурация)
+- **🐳 Docker** • **Docker Compose** (Weather Bot: бот + API + Nginx)
 - **🐧 Ubuntu 24.04** + **systemd services**
 - **📦 Git** • **GitHub** (версионирование)
 - **🔧 SSH** • **production deploy**
@@ -264,7 +265,7 @@ python bot.py
 
 ### 6. Weather Bot 🌤️
 
-Telegram-бот для получения погоды через OpenWeather API. Inline-режим, уведомления по расписанию, качество воздуха.
+Telegram-бот для получения погоды через OpenWeather API. Inline-режим, уведомления по расписанию, качество воздуха, Mini App с веб-интерфейсом. Развёрнут в **Docker** (бот + API + Nginx), работает **24/7**.
 
 **Возможности:**
 
@@ -273,21 +274,23 @@ Telegram-бот для получения погоды через OpenWeather AP
 * Кэширование ответов API (TTL 10 мин), retry при rate limit
 * Уведомления о погоде по расписанию
 * Анализ качества воздуха
+* Mini App — веб-приложение с погодой и анимированным фоном
 * Fallback-перевод описаний на русский
 
-**Технологии:** Python, pyTelegramBotAPI, requests, OpenWeather API, python-dotenv
+**Технологии:** Python, pyTelegramBotAPI, requests, OpenWeather API, Docker, Docker Compose, Nginx, Gunicorn, python-dotenv
 
-**Быстрый старт:**
+**Быстрый старт (Docker):**
 
 ```bash
 cd weather_bot
-pip install -r requirements.txt
 cp .env.example .env
 # Заполните BOT_TOKEN и OW_API_KEY в .env
-python bot.py
+docker compose up -d --build
 ```
 
-**📸 Демонстрация:** [@spiritweather_bot](https://t.me/spiritweather_bot) — LIVE, inline-режим работает.
+Локально без Docker: `pip install -r requirements.txt` и `python bot.py`. Подробнее — [README проекта](weather_bot/README.md) и **MINIAPP-NGINX.md**.
+
+**📸 Демонстрация:** [@spiritweather_bot](https://t.me/spiritweather_bot) — **LIVE 24/7**, inline-режим и Mini App работают.
 
 ---
 
