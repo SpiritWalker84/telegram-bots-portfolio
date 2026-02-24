@@ -16,6 +16,7 @@
 |-----|------------|------|--------|
 | **Booking Bot** | Бронирование услуг салона красоты<br>Календарь, базы данных, админ-панель | aiogram 3.x • SQLite • FSM • Pydantic | 🟢 **LIVE** [@brooking_bbot](https://t.me/brooking_bbot) |
 | **Reminder Bot** | Напоминания с планировщиком<br>Расписание, уведомления | aiogram 3.x • SQLite • asyncio | 🟢 **LIVE** [@reminderdemo_bot](https://t.me/reminderdemo_bot) |
+| **Weather Bot** | Погода по городу, OpenWeather API<br>Inline-режим, уведомления, качество воздуха | pyTelegramBotAPI • requests • кэш | 🟢 **LIVE** [@spiritweather_bot](https://t.me/spiritweather_bot) |
 
 ## 🛠 Стек технологий
 
@@ -258,6 +259,35 @@ python bot.py
 2. Администратор получает сообщение в Telegram с указанием `chat_id`
 3. Администратор отвечает на сообщение в Telegram (reply)
 4. Ответ автоматически появляется на сайте
+
+---
+
+### 6. Weather Bot 🌤️
+
+Telegram-бот для получения погоды через OpenWeather API. Inline-режим, уведомления по расписанию, качество воздуха.
+
+**Возможности:**
+
+* Погода по городу (команды и inline: `@spiritweather_bot Москва`)
+* Геолокация пользователя
+* Кэширование ответов API (TTL 10 мин), retry при rate limit
+* Уведомления о погоде по расписанию
+* Анализ качества воздуха
+* Fallback-перевод описаний на русский
+
+**Технологии:** Python, pyTelegramBotAPI, requests, OpenWeather API, python-dotenv
+
+**Быстрый старт:**
+
+```bash
+cd weather_bot
+pip install -r requirements.txt
+cp .env.example .env
+# Заполните BOT_TOKEN и OW_API_KEY в .env
+python bot.py
+```
+
+**📸 Демонстрация:** [@spiritweather_bot](https://t.me/spiritweather_bot) — LIVE, inline-режим работает.
 
 ---
 
